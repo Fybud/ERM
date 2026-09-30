@@ -85,7 +85,7 @@ export const CHANNEL_CREDENTIAL_META: Record<
     { key: "accessToken", label: "Access token", type: "password" },
   ],
   SHOPIFY: [
-    { key: "shopDomain", label: "Shop (e.g. fiberai)" },
+    { key: "shopDomain", label: "Shop (e.g. fybud)" },
     { key: "clientId", label: "Client ID" },
     { key: "clientSecret", label: "Client secret", type: "password" },
   ],

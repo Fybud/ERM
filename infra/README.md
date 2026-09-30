@@ -1,9 +1,9 @@
-# ERP tenant stacks (FiberAI Deploy)
+# ERP tenant stacks (fybud Deploy)
 
-Image-only Compose. Shared Postgres = `fiberai-postgres` on `fiberai-net`. Per-tenant Redis stays in this compose (private network).
+Image-only Compose. Shared Postgres = `fybud-postgres` on `fybud-net`. Per-tenant Redis stays in this compose (private network).
 
-| Folder | Domains | DB |
-|---|---|---|
+| Folder  | Domains                              | DB         |
+| ------- | ------------------------------------ | ---------- |
 | `demo/` | `erp.fybud.com`, `api.erp.fybud.com` | `erp-demo` |
 
-GitHub Actions: `.github/workflows/build-push.yml` → `fiberai/erp-api`, `fiberai/erp-web`.
+GitHub Actions: `.github/workflows/build-push.yml` → `fybud/erp-api`, `fybud/erp-web`.

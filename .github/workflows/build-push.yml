@@ -1,7 +1,7 @@
 name: build-push
 
 # Build ERP images on GitHub-hosted runners, push to Docker Hub,
-# then notify FiberAI Deploy to redeploy approved tenants.
+# then notify fybud Deploy to redeploy approved tenants.
 # The VPS never builds images. The web image is built with an empty
 # VITE_API_BASE_URL so it calls the API same-origin (one image per all tenants).
 
@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 env:
-  DOCKERHUB_ORG: fiberai
+  DOCKERHUB_ORG: fybud
   TOOL: erp
 
 jobs:
@@ -63,7 +63,7 @@ jobs:
     if: success()
     runs-on: ubuntu-latest
     steps:
-      - name: Notify FiberAI Deploy
+      - name: Notify fybud Deploy
         env:
           DEPLOY_WEBHOOK_URL: ${{ secrets.DEPLOY_WEBHOOK_URL }}
           DEPLOY_WEBHOOK_SECRET: ${{ secrets.DEPLOY_WEBHOOK_SECRET }}

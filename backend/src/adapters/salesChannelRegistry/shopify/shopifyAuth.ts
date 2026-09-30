@@ -4,13 +4,13 @@ export function normalizeShopifyShopDomain(input: string): string {
   let shop = input.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/$/, "");
   if (!shop) throw new AppError("Shop domain is required", 400);
 
-  // Accept "fiberai" → "fiberai.myshopify.com"
+  // Accept "fybud" → "fybud.myshopify.com"
   if (!shop.includes(".")) {
     shop = `${shop}.myshopify.com`;
   }
 
   if (!/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(shop)) {
-    throw new AppError("Enter a valid Shopify shop (e.g. fiberai or fiberai.myshopify.com)", 400);
+    throw new AppError("Enter a valid Shopify shop (e.g. fybud or fybud.myshopify.com)", 400);
   }
 
   return shop;
