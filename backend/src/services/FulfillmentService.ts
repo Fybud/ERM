@@ -31,7 +31,21 @@ export class FulfillmentService {
    * Called when merchant marks Packed. Does not create labels or advance past PACKED.
    * Channel-side pack signals (Easy Ship / NFBF) run when preparing shipment.
    */
-  async onPacked(_order: Order): Promise<OrderStatus | null> {
+  async onPacked(order: Order): Promise<OrderStatus | null> {
+    if (String(order.marketplace).toUpperCase() !== "SHOPIFY" || !order.channelOrderId) {
+      return null;
+    }
+    const channelAdapter = await channelManager.getAdapter("SHOPIFY");
+    if (!channelAdapter) {
+      throw new AppError(
+        "Shopify is not connected. Connect Shopify in Settings, then mark the order packed again.",
+        400
+      );
+    }
+    await channelAdapter.fulfillOrder({
+      channelOrderId: order.channelOrderId,
+      action: "PACK",
+    });
     return null;
   }
 
@@ -216,7 +230,7 @@ export class FulfillmentService {
     });
     await this.setOrderStatus(order.id, "SHIPMENT_CREATED");
 
-    if (["AMAZON", "FLIPKART"].includes(channel)) {
+    if (["AMAZON", "FLIPKART", "SHOPIFY"].includes(channel)) {
       const channelAdapter = await channelManager.getAdapter(channel);
       await notifyMarketplaceSelfShip(channelAdapter, {
         channelOrderId: order.channelOrderId,
@@ -381,7 +395,7 @@ export class FulfillmentService {
     await this.setOrderStatus(order.id, "PICKUP_SCHEDULED");
 
     const channel = order.marketplace as ChannelType;
-    if (["AMAZON", "FLIPKART"].includes(String(channel))) {
+    if (["AMAZON", "FLIPKART", "SHOPIFY"].includes(String(channel))) {
       const channelAdapter = await channelManager.getAdapter(channel);
       await notifyMarketplaceSelfShip(channelAdapter, {
         channelOrderId: order.channelOrderId,

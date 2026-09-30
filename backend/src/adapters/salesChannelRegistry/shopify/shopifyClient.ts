@@ -153,6 +153,14 @@ export class ShopifyClient {
         (scopeHint ? ` Current token scopes: ${scopeHint}` : "")
       );
     }
+    if (path.includes("fulfillment")) {
+      return (
+        `Shopify fulfillment denied (403). Enable Admin API scopes ` +
+        `write_fulfillments, write_merchant_managed_fulfillment_orders ` +
+        `on the custom app, then Disconnect and Connect again so a new token is issued.` +
+        (scopeHint ? ` Current token scopes: ${scopeHint}` : "")
+      );
+    }
     if (fallback && fallback !== "Shopify API 403") return fallback;
     return (
       `Shopify API access denied (403). Check the custom app scopes and reinstall/reconnect.` +
@@ -520,14 +528,25 @@ export class ShopifyClient {
   }
 
   async getFulfillment(orderId: string) {
-    return memory.fulfillments.get(Number(orderId)) || null;
+    if (this.useMockCatalog()) {
+      return memory.fulfillments.get(Number(orderId)) || null;
+    }
+    try {
+      const json = await this.shopifyFetch<{ fulfillments: ShopifyFulfillmentRaw[] }>(
+        `/orders/${orderId}/fulfillments.json`
+      );
+      const list = json.fulfillments || [];
+      return list[list.length - 1] || null;
+    } catch {
+      return memory.fulfillments.get(Number(orderId)) || null;
+    }
   }
 
   async createFulfillment(
     orderId: string,
     opts: { trackingNumber?: string; carrier?: string }
   ): Promise<ShopifyFulfillmentRaw> {
-    if (env.mockChannels) {
+    if (this.useMockCatalog()) {
       const fulfillment: ShopifyFulfillmentRaw = {
         id: Date.now(),
         order_id: Number(orderId),
@@ -539,16 +558,129 @@ export class ShopifyClient {
       return fulfillment;
     }
 
-    // Real fulfillment needs fulfillment orders API; keep local stub for board progression.
-    const fulfillment: ShopifyFulfillmentRaw = {
-      id: Date.now(),
-      order_id: Number(orderId),
-      status: "success",
-      tracking_number: opts.trackingNumber || `SHP-${Math.floor(Math.random() * 1e8)}`,
-      tracking_company: opts.carrier || "Merchant Logistics",
+    const existing = await this.getFulfillment(orderId);
+    if (existing && opts.trackingNumber) {
+      try {
+        const updated = await this.shopifyFetch<{ fulfillment: ShopifyFulfillmentRaw }>(
+          `/fulfillments/${existing.id}/update_tracking.json`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              fulfillment: {
+                notify_customer: false,
+                tracking_info: {
+                  number: opts.trackingNumber,
+                  company: opts.carrier || "Other",
+                },
+              },
+            }),
+          }
+        );
+        if (updated.fulfillment) return updated.fulfillment;
+      } catch {
+        // Fall through and try create
+      }
+    }
+
+    let open: Array<{ id: number; status: string }> = [];
+    try {
+      const fos = await this.shopifyFetch<{
+        fulfillment_orders: Array<{ id: number; status: string }>;
+      }>(`/orders/${orderId}/fulfillment_orders.json`);
+
+      const held = (fos.fulfillment_orders || []).filter(
+        (fo) => String(fo.status) === "on_hold"
+      );
+      for (const fo of held) {
+        try {
+          await this.shopifyFetch(`/fulfillment_orders/${fo.id}/release_hold.json`, {
+            method: "POST",
+          });
+        } catch {
+          // Hold may require merchant action in Shopify Admin.
+        }
+      }
+
+      const refreshed =
+        held.length > 0
+          ? await this.shopifyFetch<{
+              fulfillment_orders: Array<{ id: number; status: string }>;
+            }>(`/orders/${orderId}/fulfillment_orders.json`)
+          : fos;
+
+      open = (refreshed.fulfillment_orders || []).filter((fo) =>
+        ["open", "in_progress", "scheduled"].includes(String(fo.status))
+      );
+    } catch (error) {
+      const legacy = await this.createLegacyFulfillment(orderId, opts);
+      if (legacy) return legacy;
+      throw error;
+    }
+
+    if (!open.length) {
+      if (existing) return existing;
+      const legacy = await this.createLegacyFulfillment(orderId, opts);
+      if (legacy) return legacy;
+      throw new AppError(
+        "Shopify order has no open fulfillment orders (already fulfilled, or missing write_fulfillments / write_merchant_managed_fulfillment_orders scopes). Enable those scopes on the custom app, then Disconnect and Connect again.",
+        409
+      );
+    }
+
+    const fulfillmentPayload: Record<string, unknown> = {
+      notify_customer: false,
+      line_items_by_fulfillment_order: open.map((fo) => ({
+        fulfillment_order_id: fo.id,
+      })),
     };
-    memory.fulfillments.set(Number(orderId), fulfillment);
-    return fulfillment;
+    if (opts.trackingNumber) {
+      fulfillmentPayload.tracking_info = {
+        number: opts.trackingNumber,
+        company: opts.carrier || "Other",
+      };
+    }
+
+    try {
+      const json = await this.shopifyFetch<{ fulfillment: ShopifyFulfillmentRaw }>(
+        "/fulfillments.json",
+        {
+          method: "POST",
+          body: JSON.stringify({ fulfillment: fulfillmentPayload }),
+        }
+      );
+      if (!json.fulfillment) {
+        throw new AppError("Shopify did not return a fulfillment", 502);
+      }
+      return json.fulfillment;
+    } catch (error) {
+      const legacy = await this.createLegacyFulfillment(orderId, opts);
+      if (legacy) return legacy;
+      throw error;
+    }
+  }
+
+  private async createLegacyFulfillment(
+    orderId: string,
+    opts: { trackingNumber?: string; carrier?: string }
+  ): Promise<ShopifyFulfillmentRaw | null> {
+    try {
+      const json = await this.shopifyFetch<{ fulfillment: ShopifyFulfillmentRaw }>(
+        `/orders/${orderId}/fulfillments.json`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            fulfillment: {
+              notify_customer: false,
+              tracking_number: opts.trackingNumber,
+              tracking_company: opts.carrier || "Other",
+            },
+          }),
+        }
+      );
+      return json.fulfillment || null;
+    } catch {
+      return null;
+    }
   }
 
   static injectOrder(order: ShopifyOrderRaw) {

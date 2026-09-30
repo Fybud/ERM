@@ -95,10 +95,37 @@ export class ShopifyAdapter implements ChannelAdapter {
           `Shopify token is missing scopes: ${missing.join(", ")}. ` +
             `In Dev Dashboard → ERP → active version, enable ` +
             `read_products, write_products, read_inventory, write_inventory, read_locations, ` +
-            `then uninstall + reinstall the app on fiberai and Connect again.`,
+            `write_fulfillments, write_merchant_managed_fulfillment_orders, ` +
+            `then uninstall + reinstall the app on the shop and Connect again.`,
           403
         );
       }
+    }
+  }
+
+  private assertFulfillmentScopes() {
+    const granted = new Set(
+      String(this.credentials.scope || "")
+        .split(/[,\s]+/)
+        .map((s) => s.trim())
+        .filter(Boolean)
+    );
+    if (!granted.size) return;
+    const missing: string[] = [];
+    if (!granted.has("write_fulfillments")) missing.push("write_fulfillments");
+    if (
+      !granted.has("write_merchant_managed_fulfillment_orders") &&
+      !granted.has("read_merchant_managed_fulfillment_orders")
+    ) {
+      missing.push("write_merchant_managed_fulfillment_orders");
+    }
+    if (missing.length) {
+      throw new AppError(
+        `Shopify cannot update order fulfillment. Enable Admin API scopes ` +
+          `${missing.join(", ")} on the custom app, then Disconnect and Connect again ` +
+          `so a new token is issued. Current token scopes: ${[...granted].join(", ")}`,
+        403
+      );
     }
   }
 
@@ -162,6 +189,7 @@ export class ShopifyAdapter implements ChannelAdapter {
   }
 
   async fulfillOrder(input: FulfillOrderInput): Promise<AdapterShipment> {
+    this.assertFulfillmentScopes();
     if (input.action === "UPDATE_SHIPMENT") {
       const shipment = await this.requireClient().createFulfillment(input.channelOrderId, {
         trackingNumber: input.trackingNumber,

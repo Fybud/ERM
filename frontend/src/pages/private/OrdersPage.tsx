@@ -86,9 +86,9 @@ export default function OrdersPage() {
     }
   }, [channelFilter, connectedChannels, channelsLoaded]);
 
-  function showToast(msg: string) {
+  function showToast(msg: string, ms = 3000) {
     setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3000);
+    setTimeout(() => setToastMessage(null), ms);
   }
 
   async function handlePack(orderId: string) {
@@ -103,7 +103,7 @@ export default function OrdersPage() {
       });
       showToast("Packed — move to Shipment / Pickup to generate the label.");
     } catch (err) {
-      showToast(err instanceof Error ? err.message : "Failed to mark packed");
+      showToast(err instanceof Error ? err.message : "Failed to mark packed", 10000);
       await ctx.loadOrders();
     }
   }
@@ -122,7 +122,7 @@ export default function OrdersPage() {
         showToast("Label created — schedule pickup.");
       }
     } catch (err) {
-      showToast(err instanceof Error ? err.message : "Failed to create shipment / label");
+      showToast(err instanceof Error ? err.message : "Failed to create shipment / label", 10000);
       await ctx.loadOrders();
     }
   }
@@ -168,6 +168,41 @@ export default function OrdersPage() {
       return OrderStatus.SHIPMENT_CREATED;
     }
     return null;
+  };
+
+  const getBoardStatus = (order: Order): OrderStatus => {
+    if (
+      order.status === OrderStatus.CANCELLED ||
+      order.status === OrderStatus.DELIVERED ||
+      order.status === OrderStatus.DELIVERY_FAILED ||
+      order.status === OrderStatus.RETURN_REQUESTED ||
+      order.status === OrderStatus.RETURNED
+    ) {
+      return order.status;
+    }
+    if (
+      order.shippedAt ||
+      order.status === OrderStatus.PICKED_UP ||
+      order.status === OrderStatus.IN_TRANSIT ||
+      order.status === OrderStatus.OUT_FOR_DELIVERY
+    ) {
+      return order.status === OrderStatus.OUT_FOR_DELIVERY
+        ? OrderStatus.OUT_FOR_DELIVERY
+        : OrderStatus.IN_TRANSIT;
+    }
+    if (
+      order.status === OrderStatus.SHIPMENT_CREATED ||
+      order.status === OrderStatus.PICKUP_SCHEDULED ||
+      Boolean(order.trackingNumber)
+    ) {
+      return order.status === OrderStatus.PICKUP_SCHEDULED
+        ? OrderStatus.PICKUP_SCHEDULED
+        : OrderStatus.SHIPMENT_CREATED;
+    }
+    if (order.packedAt || order.status === OrderStatus.PACKED) {
+      return OrderStatus.PACKED;
+    }
+    return order.status;
   };
 
   const filteredOrders = useMemo(() => {
@@ -216,7 +251,7 @@ export default function OrdersPage() {
 
       <div className="flex gap-3 overflow-x-auto pb-2 flex-1 min-h-0">
         {columns.map((col) => {
-          const colOrders = filteredOrders.filter((o) => col.statuses.includes(o.status));
+          const colOrders = filteredOrders.filter((o) => col.statuses.includes(getBoardStatus(o)));
           return (
             <OrderColumn
               key={col.id}
@@ -226,7 +261,8 @@ export default function OrdersPage() {
               onDropOrder={handleDropOrder}
             >
               {colOrders.map((order) => {
-                const next = getNextStatus(order.status);
+                const boardStatus = getBoardStatus(order);
+                const next = getNextStatus(boardStatus);
                 return (
                   <OrderCard
                     key={order.id}
@@ -253,7 +289,7 @@ export default function OrdersPage() {
                           : undefined
                     }
                     onSchedulePickup={
-                      order.status === OrderStatus.SHIPMENT_CREATED
+                      boardStatus === OrderStatus.SHIPMENT_CREATED
                         ? () => setScheduleOrder(order)
                         : undefined
                     }
@@ -276,7 +312,7 @@ export default function OrdersPage() {
       />
 
       {toastMessage && (
-        <div className="fixed bottom-6 right-6 bg-neutral-900 text-white text-sm px-4 py-2 rounded-lg shadow-lg z-50">
+        <div className="fixed bottom-6 right-6 bg-neutral-900 text-white text-sm px-4 py-2 rounded-lg shadow-lg z-50 max-w-md">
           {toastMessage}
         </div>
       )}

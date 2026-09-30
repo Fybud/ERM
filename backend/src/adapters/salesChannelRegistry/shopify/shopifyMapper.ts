@@ -5,6 +5,9 @@ import { toCanonicalStatus } from "../../../services/orderLifecycle.js";
 
 function mapOrderStatus(fulfillmentStatus: string | null): ReturnType<typeof toCanonicalStatus> {
   if (!fulfillmentStatus) return "READY_TO_PACK";
+  const s = fulfillmentStatus.toLowerCase();
+  if (s === "fulfilled") return "SHIPMENT_CREATED";
+  if (s === "partial") return "PACKED";
   return toCanonicalStatus(fulfillmentStatus);
 }
 

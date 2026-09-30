@@ -9,6 +9,8 @@ import { ChannelType } from "../models/domain.js";
 import { publishEvent } from "../events/eventBus.js";
 import {
   assertValidTransition,
+  furtherStatus,
+  inferStatusFromTimestamps,
   isMerchantTransition,
   StatusSource,
   timestampsForStatus,
@@ -24,10 +26,14 @@ function toFrontendOrder(
   const meta = shipment?.metadata || {};
   const labelUrl =
     typeof meta.labelUrl === "string" && meta.labelUrl.trim() ? String(meta.labelUrl) : undefined;
+  let status = inferStatusFromTimestamps(order.status, order);
+  if (shipment?.trackingNumber || shipment?.carrier) {
+    status = furtherStatus(status, "SHIPMENT_CREATED");
+  }
   return {
     id: order.id,
     marketplace: order.marketplace,
-    status: order.status,
+    status,
     lastStatusSource: order.lastStatusSource || undefined,
     createdAt: order.createdAt,
     packedAt: order.packedAt || undefined,
@@ -62,7 +68,16 @@ export class OrderService {
   async list() {
     const orders = await orderRepository.list();
     const shipments = await shipmentRepository.findLatestByOrderIds(orders.map((o) => o.id));
-    return orders.map((o) => toFrontendOrder(o, shipments.get(o.id) || null));
+    const views = [];
+    for (const o of orders) {
+      const shipment = shipments.get(o.id) || null;
+      const view = toFrontendOrder(o, shipment);
+      if (view.status !== o.status) {
+        await orderRepository.updateStatus(o.id, view.status, {}, "SYSTEM");
+      }
+      views.push(view);
+    }
+    return views;
   }
 
   async applyStatusChange(
@@ -90,10 +105,15 @@ export class OrderService {
       ...options.timestamps,
     };
 
+    // Shopify fulfill must succeed before ERP shows Packed; otherwise the board lies.
+    if (options.triggerFulfillment && to === "PACKED") {
+      await this.maybeFulfillOnChannel(existing, to);
+    }
+
     const updated = await orderRepository.updateStatus(id, to, stamps, source);
     if (!updated) throw new AppError("Order not found", 404);
 
-    if (options.triggerFulfillment) {
+    if (options.triggerFulfillment && to !== "PACKED") {
       await this.maybeFulfillOnChannel(existing, to);
     }
 
@@ -229,11 +249,7 @@ export class OrderService {
       return;
     }
     if (status === "PACKED") {
-      try {
-        await fulfillmentService.onPacked(existing);
-      } catch {
-        // Pack is local ERP status — channel side-effects must not block.
-      }
+      await fulfillmentService.onPacked(existing);
     }
   }
 
@@ -275,7 +291,23 @@ export class OrderService {
       items,
     });
 
-    await orderRepository.updateStatus(saved.id, status, timestampsForStatus(status), marketplace);
+    const stamps = timestampsForStatus(status);
+    const inferred = inferStatusFromTimestamps(saved.status, {
+      packedAt: stamps.packedAt || saved.packedAt,
+      shippedAt: stamps.shippedAt || saved.shippedAt,
+      deliveredAt: stamps.deliveredAt || saved.deliveredAt,
+    });
+    const fillStamps =
+      saved.status === status
+        ? {
+            packedAt: saved.packedAt ? undefined : stamps.packedAt,
+            shippedAt: saved.shippedAt ? undefined : stamps.shippedAt,
+            deliveredAt: saved.deliveredAt ? undefined : stamps.deliveredAt,
+          }
+        : {};
+    if (inferred !== saved.status || fillStamps.packedAt || fillStamps.shippedAt || fillStamps.deliveredAt) {
+      await orderRepository.updateStatus(saved.id, inferred, fillStamps, marketplace);
+    }
 
     const refreshed = (await orderRepository.findById(saved.id))!;
 

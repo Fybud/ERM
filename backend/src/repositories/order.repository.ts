@@ -1,5 +1,6 @@
 import { query, withTransaction } from "../config/db.js";
 import { Order, OrderItem, OrderStatus } from "../models/domain.js";
+import { furtherStatus, inferStatusFromTimestamps } from "../services/orderLifecycle.js";
 import type pg from "pg";
 
 function mapItem(row: Record<string, unknown>): OrderItem {
@@ -84,6 +85,15 @@ export class OrderRepository {
 
       let orderRow: Record<string, unknown>;
       if (existing.rows[0]) {
+        const current = String(existing.rows[0].status) as OrderStatus;
+        const incoming = input.status;
+        const fromTimestamps = inferStatusFromTimestamps(current, {
+          packedAt: existing.rows[0].packed_at ? String(existing.rows[0].packed_at) : null,
+          shippedAt: existing.rows[0].shipped_at ? String(existing.rows[0].shipped_at) : null,
+          deliveredAt: existing.rows[0].delivered_at ? String(existing.rows[0].delivered_at) : null,
+        });
+        const nextStatus =
+          incoming === "CANCELLED" ? incoming : furtherStatus(furtherStatus(current, incoming), fromTimestamps);
         const updated = await client.query(
           `UPDATE orders SET
              status = $3,
@@ -96,7 +106,7 @@ export class OrderRepository {
           [
             input.channelConfigId,
             input.channelOrderId,
-            input.status,
+            nextStatus,
             input.totalAmount,
             input.currency,
             input.customerId || null,

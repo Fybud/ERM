@@ -85,6 +85,40 @@ export function assertValidTransition(from: OrderStatus, to: OrderStatus) {
   }
 }
 
+export function statusRank(status: OrderStatus): number {
+  const i = CANONICAL_STATUSES.indexOf(status);
+  return i < 0 ? 0 : i;
+}
+
+export function furtherStatus(a: OrderStatus, b: OrderStatus): OrderStatus {
+  return statusRank(a) >= statusRank(b) ? a : b;
+}
+
+/**
+ * packedAt / shippedAt survive channel syncs that rewind `status`.
+ * Prefer the furthest of stored status vs timestamps so the kanban matches the card timeline.
+ */
+export function inferStatusFromTimestamps(
+  status: OrderStatus,
+  timestamps: {
+    packedAt?: string | null;
+    shippedAt?: string | null;
+    deliveredAt?: string | null;
+  }
+): OrderStatus {
+  if (status === "CANCELLED") return status;
+  let next = status;
+  if (timestamps.packedAt) next = furtherStatus(next, "PACKED");
+  if (timestamps.shippedAt) next = furtherStatus(next, "IN_TRANSIT");
+  if (timestamps.deliveredAt) {
+    if (status === "DELIVERY_FAILED" || status === "RETURNED" || status === "RETURN_REQUESTED") {
+      return status;
+    }
+    next = furtherStatus(next, "DELIVERED");
+  }
+  return next;
+}
+
 export function timestampsForStatus(status: OrderStatus): Partial<{
   packedAt: string;
   shippedAt: string;
@@ -116,7 +150,9 @@ export function toCanonicalStatus(raw: string | null | undefined): OrderStatus {
 
   // Renamed / legacy ERM statuses
   if (s === "PROCESSING" || s === "AWAITING_PACKAGING") return "READY_TO_PACK";
-  if (s === "AWAITING_SHIPPING") return "PACKED";
+  if (s === "FULFILLED") return "SHIPMENT_CREATED";
+  if (s === "PARTIAL" || s === "PARTIALY_FULFILLED" || s === "PARTIALLY_FULFILLED") return "PACKED";
+  if (s === "UNFULFILLED" || s === "NULL") return "READY_TO_PACK";
   if (s === "READY_FOR_LOGISTICS") return "PICKUP_SCHEDULED";
   if (s === "SHIPPED") return "IN_TRANSIT";
   if (s === "RTO" || s === "FAILED_DELIVERY") return "DELIVERY_FAILED";
