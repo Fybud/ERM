@@ -1,0 +1,49 @@
+# ERP — demo tenant (image-only).
+# Domains: erp.fybud.com / api.erp.fybud.com
+# Shared Postgres on fiberai-net; Redis isolated on tenant-local network.
+# Nginx: infra/demo/nginx/erp.fybud.com.conf (installed on first deploy).
+# FiberAI Deploy writes .env (DATABASE_URL, CORS_ORIGIN, …). Never committed.
+
+name: erp-demo
+
+services:
+  backend:
+    image: fiberai/erp-api:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file: [.env]
+    environment:
+      PORT: 4000
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL required}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      CORS_ORIGIN: ${CORS_ORIGIN:?CORS_ORIGIN required}
+      PUBLIC_API_URL: ${PUBLIC_API_URL:-}
+    volumes:
+      - uploads:/app/uploads
+    ports:
+      - "127.0.0.1:${API_HOST_PORT:-4300}:4000"
+    networks: [fiberai-net, tenant]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Not on fiberai-net — other tenants cannot reach this Redis.
+    networks: [tenant]
+
+  frontend:
+    image: fiberai/erp-web:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${WEB_HOST_PORT:-9300}:80"
+    depends_on: [backend]
+    networks: [tenant]
+
+volumes:
+  uploads:
+
+networks:
+  fiberai-net:
+    external: true
+  tenant:
+    name: erp-demo-net
+    driver: bridge
