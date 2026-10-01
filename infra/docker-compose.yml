@@ -9,6 +9,12 @@ services:
     environment:
       PORT: 4000
       NODE_ENV: production
+      # Paste in the Deploy UI (Settings → Tool specs → requiredEnv): empty value = "needs pasting".
+      ADMIN_PASSWORD:
+      ENCRYPTION_KEY:
+      # Optional — paste only if used (optionalEnv): REDIS_URL, SIMULATION_MODE, MOCK_CHANNELS,
+      # SYNC_CRON, LOG_LEVEL. REDIS_URL defaults to the private sidecar below.
+      # Deploy-injected — never pasted.
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL required}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       CORS_ORIGIN: ${CORS_ORIGIN:?CORS_ORIGIN required}

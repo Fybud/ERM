@@ -92,21 +92,39 @@ instead of silently probing the wrong path.
 
 `env_file: [.env]` tells Docker to load keys, but it does **not** say *which* keys must exist — a
 forgotten variable then only shows up as a container crash loop. So every variable a service reads
-must **also** be declared under `environment:`, with a required reference:
+must **also** be declared under `environment:`, and the value itself says where it comes from:
 
 ```yaml
     env_file: [.env]
     environment:
-      PORT: 4100
-      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET required}   # no value → the deploy fails by name
+      PORT: 4100                        # fixed in the image — never pasted
+      JWT_SECRET:                       # PASTE in the Deploy UI (Settings → Tool specs → requiredEnv)
+      GOOGLE_CLIENT_SECRET:             # PASTE (listed in optionalEnv → optional)
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL required}   # Deploy-injected — never pasted
 ```
 
-- `${VAR:?message}` makes `docker compose config` / `up` fail with **that message** when the value
-  is absent, so the run log names the key instead of the app dying later with a stack trace.
-- Keep `env_file` for the values; `environment:` is the **manifest of required keys**.
-- Deploy-injected values (`WEB_HOST_PORT`, `API_HOST_PORT`, `DATABASE_URL`) are declared the same
-  way but are never pasted into the UI.
-- `verify-all.mjs` fails any service that has `env_file` without `environment:`.
+| Value in `environment:` | Meaning |
+|---|---|
+| `PORT: 4100` | Fixed literal, baked into the image — never pasted |
+| `JWT_SECRET:` (empty) | **Must be pasted in the Deploy UI.** The empty value *is* the flag, so the compose is a per-service paste manifest — and `verify-all.mjs` cross-checks it against the tool spec |
+| `${VAR:?message}` | Deploy-injected (`*_HOST_PORT`, `DATABASE_URL`, per-tool URLs) — never pasted; `docker compose config` / `up` aborts **naming the key** when the value is absent |
+| `${VAR:-default}` | Optional, with a working default |
+
+- An empty declaration is not a blank value: Deploy runs `docker compose --project-directory <tenant
+  dir>`, so the entry resolves from the runtime `.env` it writes — the pasted value still reaches the
+  container, and a key nobody pasted arrives empty instead of clobbering `env_file`.
+- `environment:` is the **manifest of what must be pasted**; keep `env_file` for the values. This is
+  also the per-service list a human reads to know what the Deploy UI still needs.
+- Deploy refuses to deploy without those keys: approve and env-save answer `400` with a `missing[]`
+  list, and the runner re-checks before `compose up` — a push-to-`main` redeploy that lost a key fails
+  **naming it** instead of booting a container with it unset.
+- The empty declaration and the spec's `requiredEnv` are one list kept in two places, and
+  `verify-all.mjs` fails either drift: a tool whose spec `requiredEnv` key the compose never declares,
+  **and** a tool whose empty declaration the spec's `requiredEnv` does not list. A key that is
+  genuinely optional is declared `${KEY:-}` — present, but not "paste me" — never `KEY:`.
+- `verify-all.mjs` also fails a service with `env_file` but no `environment:`, an empty
+  `*_HOST_PORT` / `IMAGE_TAG` (injected, never pasted), and an `AGENTS.md` that drifted from this
+  canonical file.
 
 **Do not** put host ports in labels. Deploy:
 
