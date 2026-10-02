@@ -9,16 +9,18 @@ services:
     environment:
       PORT: 4000
       NODE_ENV: production
-      # Paste in the Deploy UI (Settings → Tool specs → requiredEnv): empty value = "needs pasting".
+      # Empty = paste in Deploy UI. Literal = fixed here. ${VAR:?…} = Deploy-injected.
       ADMIN_PASSWORD:
       ENCRYPTION_KEY:
-      # Optional — paste only if used (optionalEnv): REDIS_URL, SIMULATION_MODE, MOCK_CHANNELS,
-      # SYNC_CRON, LOG_LEVEL. REDIS_URL defaults to the private sidecar below.
+      SIMULATION_MODE:
+      MOCK_CHANNELS:
+      SYNC_CRON:
+      LOG_LEVEL:
+      REDIS_URL: redis://redis:6379
       # Deploy-injected — never pasted.
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL required}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       CORS_ORIGIN: ${CORS_ORIGIN:?CORS_ORIGIN required}
-      PUBLIC_API_URL: ${PUBLIC_API_URL:-}
+      PUBLIC_API_URL: ${PUBLIC_API_URL:?PUBLIC_API_URL required}
     volumes:
       - uploads:/app/uploads
     ports:
@@ -26,14 +28,17 @@ services:
     labels:
       fybud.expose: "true"
       fybud.domain: api.erp.fybud.com
+      fybud.role: api
       fybud.health: "/health"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4000/health"]
+      # node:alpine — use Node fetch (no curl package required).
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:4000/health').then(r=>process.exit(r.status<400?0:1)).catch(()=>process.exit(1))\""]
       interval: 15s
       timeout: 5s
       retries: 5
       start_period: 20s
     networks: [fybud-net, internal]
+    depends_on: [redis]
 
   redis:
     image: redis:7-alpine
@@ -48,6 +53,7 @@ services:
     labels:
       fybud.expose: "true"
       fybud.domain: erp.fybud.com
+      fybud.role: web
       fybud.health: "/"
     depends_on: [backend]
     networks: [internal]

@@ -10,10 +10,13 @@ Unified commerce operations for vendors: manage orders and inventory across Amaz
 
 ## Domains
 
-| Service | Production | Local Docker |
+| Service | Production (Fybud Deploy) | Local Docker |
 | --- | --- | --- |
-| Frontend | https://erp-demo.fybud.com | http://localhost:3000 |
-| Backend | https://api.erp-demo.fybud.com | http://localhost:4000 |
+| Frontend | https://erp.fybud.com | http://localhost:3000 |
+| Backend | https://api.erp.fybud.com | http://localhost:4000 |
+
+Deploy: root [`docker-compose.deploy.yml`](./docker-compose.deploy.yml) + [`DEPLOY.md`](./DEPLOY.md).
+Rules: [`AGENTS.md`](./AGENTS.md).
 
 ## Quick start (local Docker)
 
@@ -26,40 +29,14 @@ docker compose up --build
 - Backend: http://localhost:4000/health
 - Login password: `ADMIN_PASSWORD` in `.env` (default `12345`)
 
-## Production
+## Production (Fybud Deploy)
 
-1. Point DNS A records for `erp-demo.fybud.com` and `api.erp-demo.fybud.com` at the server.
-2. Copy env and set secrets:
+Production does **not** use local `docker compose` or hand-written nginx. Push to `main`:
 
-```bash
-cp .env.example .env
-```
-
-Set at least:
-
-```env
-NODE_ENV=production
-ADMIN_PASSWORD=...
-ENCRYPTION_KEY=...
-POSTGRES_PASSWORD=...
-CORS_ORIGIN=https://erp-demo.fybud.com
-VITE_API_BASE_URL=https://api.erp-demo.fybud.com
-ACME_EMAIL=admin@fybud.com
-```
-
-3. Start the app (host nginx already owns 80/443):
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
-```
-
-4. Copy site files, enable them, and create certificates with the VM certbot:
-
-```bash
-sudo ./scripts/enable-nginx.sh
-```
-
-Nginx files are in `nginx/`. Docker only publishes `127.0.0.1:3000` (frontend) and `127.0.0.1:4000` (backend). Rebuild the frontend after changing `VITE_API_BASE_URL`.
+1. `.github/workflows/build-push.yml` builds `fybud/erp-api` + `fybud/erp-web` and notifies Deploy.
+2. Deploy sparse-clones root `docker-compose.deploy.yml`, allocates host ports, writes nginx + DNS.
+3. Paste once in Deploy UI: `ADMIN_PASSWORD`, `ENCRYPTION_KEY` (not host ports / `DATABASE_URL`).
+4. Approve → live at `https://erp.fybud.com` / `https://api.erp.fybud.com`.
 
 ## Local development (without Docker frontend/backend)
 

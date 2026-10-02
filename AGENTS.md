@@ -1,30 +1,37 @@
 # Fybud — AI / agent deploy rules
 
-**Copy this file to the root of every new Fybud repo** (or keep it as the default agent context). Follow it for all infrastructure and deploy work.
+**Copy this file to the root of every new Fybud repo** (or keep it as the default agent context).
+Follow it for all infrastructure and deploy work. Humans follow `DEPLOY.md` (same folder) for the
+step-by-step Actions + compose templates.
 
 ## Goal
 
-Push to `main` on a Fybud GitHub org repo → GitHub Actions builds/pushes Docker images → **Fybud Deploy** pulls them, allocates free host ports, writes nginx, creates Cloudflare DNS if missing → `https://{tool}.fybud.com` is live.
+Push to `main` on a Fybud GitHub org repo → GitHub Actions builds/pushes Docker images →
+**Fybud Deploy** pulls them, allocates free host ports, writes nginx, creates Cloudflare DNS if
+missing → `https://{tool}.fybud.com` is live.
 
-First time only: paste secrets in Deploy UI and approve. Later pushes redeploy automatically. This is Fybud's **own control plane** — no Coolify, no CapRover, no Traefik.
+First time only: paste secrets in Deploy UI and approve. Later pushes redeploy automatically. This
+is Fybud's **own control plane** — no Coolify, no CapRover, no Traefik.
 
 ## Repo layout
 
 ```
 MyTool/
+  DEPLOY.md                 ← human playbook (Actions + compose templates)
   AGENTS.md                 ← this file
-  README.md                 ← the step-by-step agent README (same folder)
+  README.md                 ← optional product README
   .github/workflows/build-push.yml
-  infra/
-    docker-compose.yml      ← ONLY compose Deploy reads (sparse clone)
+  docker-compose.deploy.yml ← ONLY compose Deploy reads (repo root, sparse clone)
   <app code folders>        ← api/, web/, worker/ etc. — NOT separate GitHub repos
 ```
 
 - One GitHub repo = one product (frontend + backend + workers as **folders**).
-- Do **not** create `infra/demo/`, `infra/{company}/`, or hand-written nginx configs.
-- Private sidecars (workers, redis, classifiers): own services in the same compose **or** a separate compose project with **no** public labels.
+- Compose lives at the **repo root** as `docker-compose.deploy.yml` only (not `.yaml`).
+- Do **not** create `infra/`, `infra/demo/`, `infra/{company}/`, or hand-written nginx configs.
+- Private sidecars (workers, redis, classifiers): own services in the same compose **or** a separate
+  compose project with **no** public labels.
 
-## `infra/docker-compose.yml` contract
+## `docker-compose.deploy.yml` contract
 
 ### Public service (needs domain)
 
@@ -88,6 +95,7 @@ services:
 The label must agree with the service's compose `healthcheck:` path, and every
 public API service must declare both. A typo in the label fails the deploy loudly
 instead of silently probing the wrong path.
+
 ### Env: declare every variable in the compose file
 
 `env_file: [.env]` tells Docker to load keys, but it does **not** say *which* keys must exist — a
@@ -97,18 +105,20 @@ must **also** be declared under `environment:`, and the value itself says where 
 ```yaml
     env_file: [.env]
     environment:
-      PORT: 4100                        # fixed in the image — never pasted
-      JWT_SECRET:                       # PASTE in the Deploy UI (Settings → Tool specs → requiredEnv)
-      GOOGLE_CLIENT_SECRET:             # PASTE (listed in optionalEnv → optional)
+      PORT: 4100                        # literal — fixed in compose
+      JWT_SECRET:                       # empty — PASTE in the Deploy UI (requiredEnv)
+      INTENT_CLASSIFIER_URL: http://intent-classifier:8091   # literal — fixed here
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL required}   # Deploy-injected — never pasted
 ```
 
 | Value in `environment:` | Meaning |
 |---|---|
-| `PORT: 4100` | Fixed literal, baked into the image — never pasted |
-| `JWT_SECRET:` (empty) | **Must be pasted in the Deploy UI.** The empty value *is* the flag, so the compose is a per-service paste manifest — and `verify-all.mjs` cross-checks it against the tool spec |
-| `${VAR:?message}` | Deploy-injected (`*_HOST_PORT`, `DATABASE_URL`, per-tool URLs) — never pasted; `docker compose config` / `up` aborts **naming the key** when the value is absent |
-| `${VAR:-default}` | Optional, with a working default |
+| `PORT: 4100` | **Literal** — fixed in the compose file |
+| `JWT_SECRET:` (empty) | **Paste** in the Deploy UI. The empty value *is* the flag; `verify-all.mjs` cross-checks against `requiredEnv` |
+| `${VAR:?message}` | **Deploy-injected** (`*_HOST_PORT`, `DATABASE_URL`, per-tool URLs) — never pasted |
+
+There is **no optional** form. Do not use `${KEY:-}`, `${KEY:-default}`, or `optionalEnv`.
+Every key is either a literal in compose, empty (paste), or `${:?}` (Deploy-injected).
 
 - An empty declaration is not a blank value: Deploy runs `docker compose --project-directory <tenant
   dir>`, so the entry resolves from the runtime `.env` it writes — the pasted value still reaches the
@@ -120,11 +130,10 @@ must **also** be declared under `environment:`, and the value itself says where 
   **naming it** instead of booting a container with it unset.
 - The empty declaration and the spec's `requiredEnv` are one list kept in two places, and
   `verify-all.mjs` fails either drift: a tool whose spec `requiredEnv` key the compose never declares,
-  **and** a tool whose empty declaration the spec's `requiredEnv` does not list. A key that is
-  genuinely optional is declared `${KEY:-}` — present, but not "paste me" — never `KEY:`.
-- `verify-all.mjs` also fails a service with `env_file` but no `environment:`, an empty
-  `*_HOST_PORT` / `IMAGE_TAG` (injected, never pasted), and an `AGENTS.md` that drifted from this
-  canonical file.
+  **and** a tool whose empty declaration the spec's `requiredEnv` does not list.
+- `verify-all.mjs` also fails `${KEY:-…}` in `environment:`, a service with `env_file` but no
+  `environment:`, an empty `*_HOST_PORT` / `IMAGE_TAG` (injected, never pasted), and an `AGENTS.md`
+  that drifted from this canonical file.
 
 **Do not** put host ports in labels. Deploy:
 
@@ -136,9 +145,12 @@ must **also** be declared under `environment:`, and the value itself says where 
 
 ### Network / DB
 
-- Shared Postgres container hostname: `fybud-postgres`. Deploy provisions a **per-app role and
-  database** (`cep` role owns the `cep` database) and injects `DATABASE_URL`; the shared
-  superuser login is never handed to an app.
+- Shared Postgres container hostname: `fybud-postgres`. Deploy **creates the DB if missing**
+  before compose up, provisions a per-app role, and injects `DATABASE_URL`. The DB name is
+  **not** required to match the tool slug — set `DB_NAME` in Environment (default: tool /
+  `tool-slug`). If that name is already linked to another project, Deploy fails with a DB
+  name conflict (change `DB_NAME`). The Deploy UI **Databases** page lists all DBs, root
+  credentials, and DB → project mapping. The shared superuser login is never handed to an app.
 - Never run a Postgres service inside the tool compose unless explicitly required and private.
 - **Network isolation:** only Postgres-facing services join external `fybud-net`. Every other service
   (web frontends, admin UIs, crawlers) stays on a project-local network:
@@ -164,13 +176,14 @@ must **also** be declared under `environment:`, and the value itself says where 
     cancel-in-progress: true
   ```
 - Org secrets: `DOCKERHUB_*`, `DEPLOY_WEBHOOK_URL=https://api.deploy.fybud.com/webhooks/github-actions`, `DEPLOY_WEBHOOK_SECRET` (public repos on free GitHub org plan).
+- Full workflow template: see `DEPLOY.md`.
 
 ## Deploy UI
 
 - Paste app secrets once (JWT, OAuth, etc.) — the onboarding checklist on the project page shows
   exactly which required variables are still missing.
-- Required/optional env per tool live in **Deploy → Settings → Tool specs** (stored in the Deploy
-  database). Approving or saving env is rejected with a `missing[]` list when a required var is absent.
+- Paste keys per tool live in **Deploy → Settings → Tool specs** → `requiredEnv` (stored in the Deploy
+  database). Approving or saving env is rejected with a `missing[]` list when a paste var is absent.
 - Live deploy output streams into the project's Logs tab
   (`/api/projects/:tool/runs/:id/stream`, Server-Sent Events).
 - Do **not** paste host ports or DATABASE_URL if Deploy provisions DB — it injects those.
@@ -187,17 +200,16 @@ must **also** be declared under `environment:`, and the value itself says where 
 - Do not invent Coolify / CapRover / Traefik as the edge unless explicitly asked — Fybud uses its **own control plane (host nginx + dynamic host ports + Cloudflare DNS + certbot)**.
 - Do not add a `captain-definition*`, a PaaS manifest, or hand-written nginx — there is no third-party PaaS in this stack.
 - Do not hardcode host port numbers in compose (no `9000:5173` without `${…_HOST_PORT}`).
-- Do not add per-tenant `infra/{customer}` trees.
+- Do not add an `infra/` folder for deploy compose, or per-tenant `infra/{customer}` trees.
 - Do not commit `.env` secrets.
 - Do not expose workers/redis/DB on host ports.
 
 ## Checklist for a new tool
 
-1. Add root `AGENTS.md` (this file) and `README.md` (the step-by-step agent README).
-2. Add `infra/docker-compose.yml` with expose/domain/health labels + `${*_HOST_PORT}` port lines, and declare every variable under `environment:`.
-3. Add Actions build-push → `fybud/*` images + Deploy webhook (`concurrency` set).
+1. Add root `DEPLOY.md` (human playbook) and `AGENTS.md` (this file).
+2. Add root `docker-compose.deploy.yml` with expose/domain/health labels + `${*_HOST_PORT}` port lines, and declare every variable under `environment:`.
+3. Add Actions build-push → `fybud/*` images + Deploy webhook (`concurrency` set) — template in `DEPLOY.md`.
 4. Register tool slug in Fybud Deploy `tools.ts` (or edit its spec in Settings → Tool specs).
 5. Push `main` → approve once in Deploy UI with env → later pushes auto-deploy.
 6. Verify from the Deploy repo: `node scripts/verify-all.mjs` (contract) and
    `node scripts/smoke-robust.mjs` (end-to-end).
-
