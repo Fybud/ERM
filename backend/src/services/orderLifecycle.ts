@@ -107,7 +107,8 @@ export function inferStatusFromTimestamps(
   }
 ): OrderStatus {
   if (status === "CANCELLED") return status;
-  let next = status;
+  // Keep OrderStatus (not Exclude<…, "CANCELLED">) so furtherStatus assignments type-check.
+  let next: OrderStatus = status;
   if (timestamps.packedAt) next = furtherStatus(next, "PACKED");
   if (timestamps.shippedAt) next = furtherStatus(next, "IN_TRANSIT");
   if (timestamps.deliveredAt) {
