@@ -1,0 +1,47 @@
+# Copy to docker-compose.yml and replace mytool / image names.
+# See README.md in this folder for env rules.
+name: mytool
+
+services:
+  api:
+    image: fybud/mytool-api:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file: [.env]
+    environment:
+      PORT: 4100
+      NODE_ENV: production
+      # Empty = paste in Deploy UI before first deploy
+      JWT_SECRET:
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL required}
+    ports:
+      - "127.0.0.1:${API_HOST_PORT}:4100"
+    labels:
+      fybud.expose: "true"
+      fybud.domain: api.mytool.fybud.com
+      fybud.health: "/health"
+      fybud.role: api
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4100/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks: [fybud-net]
+
+  web:
+    image: fybud/mytool-web:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${WEB_HOST_PORT}:80"
+    labels:
+      fybud.expose: "true"
+      fybud.domain: mytool.fybud.com
+      fybud.health: "/"
+      fybud.role: web
+    depends_on: [api]
+    networks: [fybud-net]
+
+networks:
+  fybud-net:
+    name: fybud-net
+    external: true
