@@ -7,7 +7,7 @@ Follow it to add GitHub Actions + `docker-compose.deploy.yml` so push-to-`main` 
 Pipeline (no Coolify / CapRover / Traefik):
 
 `git push main` → GitHub Actions builds/pushes `fybud/*` images → Fybud Deploy webhook →
-sparse clone of `docker-compose.deploy.yml` → free host ports + `.env` →
+downloads only root `docker-compose.deploy.yml` (no repo clone) → free host ports + `.env` →
 `docker compose pull && up` → Cloudflare A if missing → host nginx → TLS.
 
 First deploy: paste secrets in Deploy UI + approve. Later pushes auto-redeploy.
@@ -27,7 +27,7 @@ MyTool/
 
 | File | Role |
 |---|---|
-| `docker-compose.deploy.yml` | **At repo root only** (not `.yaml`). Deploy sparse-clones this file and runs it. |
+| `docker-compose.deploy.yml` | **At repo root only** (not `.yaml`). Deploy downloads this single file via GitHub API — no git clone. |
 | `.github/workflows/build-push.yml` | Builds images, pushes to Docker Hub `fybud/*`, POSTs the Deploy webhook. |
 | `DEPLOY.md` | This playbook. |
 
@@ -52,17 +52,18 @@ services:
     environment:
       PORT: 4100                                            # literal — fixed in compose
       JWT_SECRET:                                           # empty — PASTE in Deploy UI
-      STRIPE_SECRET_KEY: sk_live_…                          # literal — value fixed here (or leave empty to paste)
+      STRIPE_SECRET_KEY:                                    # empty — PASTE (every secret the app reads)
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL required}  # Deploy-injected — never paste
     ports:
       - "127.0.0.1:${API_HOST_PORT}:4100"                   # HOST port filled by Deploy
     labels:
       fybud.expose: "true"
       fybud.domain: api.mytool.fybud.com
-      fybud.health: "/health"                               # must match healthcheck path
       fybud.role: api
+      fybud.health: "/health"                               # strict — must match healthcheck path
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4100/health"]
+      # Prefer Node/Python over wget — many slim images do not ship wget/curl.
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:4100/health').then(r=>process.exit(r.status<400?0:1)).catch(()=>process.exit(1))\""]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -77,8 +78,8 @@ services:
     labels:
       fybud.expose: "true"
       fybud.domain: mytool.fybud.com
-      fybud.health: "/"
       fybud.role: web
+      fybud.health: "any"                                   # SPA / static — process-up only
     networks: [internal]
 
   worker:                       # private — no ports, no expose labels
@@ -87,6 +88,8 @@ services:
     command: ["worker"]
     env_file: [.env]
     environment:
+      # Declare every key the worker reads (empty = paste, or ${:?} = injected).
+      JWT_SECRET:
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL required}
     networks: [fybud-net, internal]
 
@@ -101,23 +104,30 @@ networks:
 |---|---|---|
 | `fybud.expose: "true"` | Public only | Publish + DNS + nginx |
 | `fybud.domain` | Required if expose | FQDN e.g. `cep.fybud.com` |
-| `fybud.health` | Recommended | Path Deploy probes from the host after `compose up` |
+| `fybud.health` | **Required** if expose | How Deploy probes the host port after `compose up` |
 | `fybud.role` | Optional | `web` / `api` — disambiguates domains for env computation |
 
 `fybud.health` values:
 
-| Value | Behaviour |
-|---|---|
-| `"/health"` | **Strict**: gate requires HTTP &lt; 400 (4xx/5xx → fail → auto-rollback) |
-| `"any"` | Process-up only: any HTTP response counts |
-| *(absent)* | Legacy lenient probe of `/` — Deploy warns you to declare the label |
+| Value | Behaviour | Use when |
+|---|---|---|
+| `"/health"` (or `"/api/health"`) | **Strict**: host probe requires HTTP &lt; 400 (4xx/5xx → fail → auto-rollback) | Public **API** with a real health route |
+| `"any"` | Process-up: any HTTP response on that port counts | **Web/SPA/static** (no health route), or APIs that auth-guard every path |
+| *(absent)* | Legacy lenient probe of `/` — Deploy warns you to declare the label | Never for new services |
 
-The label must match the service's compose `healthcheck:` path. Every public API declares both.
+Rules:
+
+- Every **public API** declares a compose `healthcheck:` **and** a matching strict `fybud.health` path.
+- Every **public web** service uses `fybud.health: "any"` unless it has a dedicated health route.
+- Deploy’s gate requires containers **running**, then probes `127.0.0.1:<hostPort>` using `fybud.health`. Docker’s own `healthy`/`starting` status is **not** a hard fail (images often lack wget).
+- Do not invent health endpoints just for Deploy — use `"any"` instead.
 
 ### Env: declare every variable under `environment:`
 
 `env_file: [.env]` loads values but does **not** say which keys must exist. Every variable a
-service reads must also appear under `environment:`. There is **no optional** form — only:
+service reads must also appear under `environment:` — **literally all of them**, including every
+secret in the tool’s `requiredEnv` (Deploy Settings → Tool specs / `tools.ts`). There is **no
+optional** form — only:
 
 | Value in `environment:` | Meaning |
 |---|---|
@@ -128,6 +138,12 @@ service reads must also appear under `environment:`. There is **no optional** fo
 Do **not** use `${KEY:-}`, `${KEY:-default}`, or an “optionalEnv” list. If the app needs a key,
 either give it a literal in compose or leave it empty and paste it in Deploy.
 
+Cross-check before merge:
+
+1. Every `requiredEnv` key appears as `KEY:` (empty) under some service’s `environment:`.
+2. Every empty `KEY:` in compose is listed in that tool’s `requiredEnv`.
+3. Every Deploy-injected key uses `${KEY:?…}` (never empty, never `${KEY:-}`).
+
 Deploy refuses approve / env-save without every empty key (`missing[]`). Host ports and
 `DATABASE_URL` are injected — do not paste them.
 
@@ -136,11 +152,16 @@ Deploy refuses approve / env-save without every empty key (`missing[]`). Host po
 - Ports: always `127.0.0.1:${*_HOST_PORT}:<container>` — never hardcode host ports.
 - Shared Postgres hostname: `fybud-postgres` on external `fybud-net`. Deploy **creates the
   database if it does not exist** before `docker compose up`, then injects `DATABASE_URL`.
+- Shared Postgres login (superuser / admin): **username `postgres`, password `postgres`**.
+  Example: `postgresql://postgres:postgres@fybud-postgres:5432/<db_name>`. Apps still get a
+  Deploy-injected `DATABASE_URL` — do not paste the URL yourself unless you are wiring local
+  tools against that shared instance.
 - **Database name is not required to match the tool slug.** Set `DB_NAME=my_app_db` in the
   Deploy Environment (or leave it unset to default to the tool / `tool-slug` credential).
-  If that name is already linked to another project, Deploy returns a **DB name conflict** —
-  change `DB_NAME` and save. See the **Databases** sidebar for all DBs, root credentials, and
-  DB → project mapping.
+  **Multiple projects may share one database** (e.g. CEP + CEP-Admin both use `cep`). Deploy
+  reuses the existing role password so sharing does not break the other project. CEP-Admin
+  defaults to `DB_NAME=cep`. See the **Databases** sidebar for mappings (one DB can list
+  several projects).
 - Before compose, Deploy also checks for conflicting `container_name:` values and domains.
   Fix the compose / env and redeploy — you will get a toast with the conflict.
 - Disk writers need a named volume (containers are recreated every deploy).

@@ -54,7 +54,8 @@ services:
       fybud.expose: "true"
       fybud.domain: erp.fybud.com
       fybud.role: web
-      fybud.health: "/"
+      # Static nginx SPA — process-up only.
+      fybud.health: "any"
     depends_on: [backend]
     networks: [internal]
 

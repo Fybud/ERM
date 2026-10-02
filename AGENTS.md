@@ -21,7 +21,7 @@ MyTool/
   AGENTS.md                 ← this file
   README.md                 ← optional product README
   .github/workflows/build-push.yml
-  docker-compose.deploy.yml ← ONLY compose Deploy reads (repo root, sparse clone)
+  docker-compose.deploy.yml ← ONLY file Deploy downloads (repo root; no full clone)
   <app code folders>        ← api/, web/, worker/ etc. — NOT separate GitHub repos
 ```
 
@@ -44,8 +44,9 @@ services:
     labels:
       fybud.expose: "true"
       fybud.domain: mytool.fybud.com
-      fybud.health: "/"                      # SPA entry point: probe requires HTTP < 400
-    networks: [fybud-net]
+      fybud.role: web
+      fybud.health: "any"                    # SPA / static — process-up only
+    networks: [internal]
 
   api:
     image: fybud/mytool-api:${IMAGE_TAG:-latest}
@@ -54,9 +55,10 @@ services:
     labels:
       fybud.expose: "true"
       fybud.domain: api.mytool.fybud.com
+      fybud.role: api
       fybud.health: "/health"                 # must match the compose healthcheck path
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4100/health"]
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:4100/health').then(r=>process.exit(r.status<400?0:1)).catch(()=>process.exit(1))\""]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -81,20 +83,20 @@ services:
 |---|---|---|
 | `fybud.expose: "true"` | Public only | Publish + DNS + nginx |
 | `fybud.domain` | Required if expose | FQDN e.g. `cep.fybud.com` |
-| `fybud.health` | Recommended | Path Deploy probes from the host after `docker compose up` |
+| `fybud.health` | **Required** if expose | How Deploy probes the host port after `compose up` |
 | `fybud.role` | Optional | `web` / `api` — disambiguates which domain is which for env computation |
 
 `fybud.health` values:
 
 | Value | Behaviour |
 |---|---|
-| `"/health"` | **Strict**: the gate requires HTTP < 400 at that path (4xx/5xx fails the deploy → auto-rollback) |
-| `"any"` | Process-up only: any HTTP response counts (use when the service has no health route) |
+| `"/health"` (or `"/api/health"`) | **Strict**: host probe requires HTTP < 400 (4xx/5xx → fail → auto-rollback) — public APIs |
+| `"any"` | Process-up only: any HTTP response counts — web/SPA/static, or APIs with no health route |
 | *(absent)* | Legacy lenient probe of `/` — Deploy logs a warning telling you to declare the label |
 
-The label must agree with the service's compose `healthcheck:` path, and every
-public API service must declare both. A typo in the label fails the deploy loudly
-instead of silently probing the wrong path.
+Public APIs declare a compose `healthcheck:` **and** a matching strict `fybud.health` path.
+Public web uses `"any"`. Deploy gates on containers **running**, then the host HTTP probe —
+Docker's own HEALTHY/starting status is not a hard fail.
 
 ### Env: declare every variable in the compose file
 
@@ -145,12 +147,14 @@ Every key is either a literal in compose, empty (paste), or `${:?}` (Deploy-inje
 
 ### Network / DB
 
-- Shared Postgres container hostname: `fybud-postgres`. Deploy **creates the DB if missing**
-  before compose up, provisions a per-app role, and injects `DATABASE_URL`. The DB name is
-  **not** required to match the tool slug — set `DB_NAME` in Environment (default: tool /
-  `tool-slug`). If that name is already linked to another project, Deploy fails with a DB
-  name conflict (change `DB_NAME`). The Deploy UI **Databases** page lists all DBs, root
-  credentials, and DB → project mapping. The shared superuser login is never handed to an app.
+- Shared Postgres container hostname: `fybud-postgres`. Superuser is **`postgres` / `postgres`**
+  (`postgresql://postgres:postgres@fybud-postgres:5432/<db>`). Deploy **creates the DB if
+  missing** before compose up, provisions a per-app role, and injects `DATABASE_URL` into the
+  app (do not paste it in the Deploy UI). The DB name is **not** required to match the tool
+  slug — set `DB_NAME` in Environment (default: tool / `tool-slug`; CEP-Admin defaults to
+  `cep`). **Multiple projects may share one database** — Deploy reuses the existing role
+  password. The Deploy UI **Databases** page lists all DBs, root credentials, and DB →
+  project mapping (one DB can map to several projects).
 - Never run a Postgres service inside the tool compose unless explicitly required and private.
 - **Network isolation:** only Postgres-facing services join external `fybud-net`. Every other service
   (web frontends, admin UIs, crawlers) stays on a project-local network:
@@ -160,8 +164,10 @@ Every key is either a literal in compose, empty (paste), or `${:?}` (Deploy-inje
     internal: { driver: bridge }
   ```
 - **Healthchecks:** every API service gets a compose `healthcheck:` against its health endpoint
-  (`/health`, `/api/health`, …) **and** a matching `fybud.health` label. Deploy's gate blocks on
-  unhealthy containers, then probes `127.0.0.1:<hostPort><fybud.health>` from the host.
+  (`/health`, `/api/health`, …) **and** a matching `fybud.health` label. Deploy's gate requires
+  containers **running**, then probes `127.0.0.1:<hostPort><fybud.health>` from the host (authoritative).
+  Docker's own HEALTHY/starting status is not a hard fail — SPA/web images often lack wget/curl.
+  Use `fybud.health: "any"` when the service has no real health route.
 - **State:** any service that writes to disk (uploads, media) must declare a named volume —
   containers are recreated on every deploy and local files are wiped.
 
