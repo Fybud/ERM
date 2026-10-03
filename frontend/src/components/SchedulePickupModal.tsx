@@ -3,13 +3,13 @@ import { Order } from "@/types";
 import { Button } from "@/components/ui/Button";
 import { X, Truck } from "lucide-react";
 import { getPickupSlots, PickupSlotsResponse, schedulePickup } from "@/services/order.service";
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
+import { apiBaseUrl } from "@/lib/runtimeEnv";
 
 function resolveAssetUrl(url?: string | null) {
   if (!url) return undefined;
   if (/^https?:\/\//i.test(url)) return url;
-  return `${API_BASE}${url.startsWith("/") ? url : `/${url}`}`;
+  const base = apiBaseUrl();
+  return `${base}${url.startsWith("/") ? url : `/${url}`}`;
 }
 
 export default function SchedulePickupModal({

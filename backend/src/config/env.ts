@@ -6,7 +6,7 @@ export const env = {
   databaseUrl:
     process.env.DATABASE_URL ||
     "postgresql://oms:oms_secret@localhost:5432/oms",
-  adminPassword: process.env.ADMIN_PASSWORD || "12345",
+  adminPassword: (process.env.ADMIN_PASSWORD || "12345").trim(),
   encryptionKey:
     process.env.ENCRYPTION_KEY || "dev-encryption-key-change-me-32b",
   corsOrigin: process.env.CORS_ORIGIN || "http://localhost:5173",

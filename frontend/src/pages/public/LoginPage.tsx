@@ -24,8 +24,8 @@ export default function LoginPage() {
         return;
       }
       setError("Invalid password");
-    } catch {
-      setError("Login failed");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Login failed");
     } finally {
       setLoading(false);
     }

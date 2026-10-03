@@ -19,6 +19,7 @@ services:
       SIMULATION_MODE:
       DATABASE_URL:
       CORS_ORIGIN:
+      # Injected by Deploy from fybud.domain — never paste.
       PUBLIC_API_URL:
     volumes:
       - uploads:/app/uploads
@@ -46,6 +47,10 @@ services:
   frontend:
     image: fybud/erm-web:${IMAGE_TAG:?IMAGE_TAG required}
     restart: unless-stopped
+    env_file: [.env]
+    environment:
+      # Injected by Deploy from fybud.domain on the api service — never paste.
+      VITE_API_BASE_URL:
     ports:
       - "127.0.0.1:${WEB_HOST_PORT}:80"
     labels:

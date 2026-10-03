@@ -16,9 +16,9 @@ export interface DomainEvent {
   payload: Record<string, unknown>;
 }
 
-type EventHandler = (event: DomainEvent) => void;
+import { apiBaseUrl } from "@/lib/runtimeEnv";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
+type EventHandler = (event: DomainEvent) => void;
 
 class RealtimeClient {
   private source: EventSource | null = null;
@@ -31,7 +31,7 @@ class RealtimeClient {
     if (this.source && this.source.readyState !== EventSource.CLOSED) return;
 
     this.intentionalClose = false;
-    const url = `${API_BASE}/api/events`;
+    const url = `${apiBaseUrl()}/api/events`;
     const source = new EventSource(url);
     this.source = source;
 

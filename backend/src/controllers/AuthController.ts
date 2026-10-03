@@ -4,7 +4,7 @@ import { AppError } from "../middleware/errorHandler.js";
 
 export class AuthController {
   login = async (req: Request, res: Response) => {
-    const password = String(req.body?.password || "");
+    const password = String(req.body?.password || "").trim();
     if (!env.adminPassword) {
       throw new AppError("No admin password configured", 500);
     }

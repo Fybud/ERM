@@ -2,13 +2,13 @@ import { useState } from "react";
 import { Order, OrderStatus, Marketplace } from "@/types";
 import { Badge } from "@/components/ui/Badge";
 import { ChevronDown, ChevronUp, Package, Clock, Truck, CheckCircle2, AlertCircle, GripVertical, Download } from "lucide-react";
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
+import { apiBaseUrl } from "@/lib/runtimeEnv";
 
 function resolveAssetUrl(url?: string) {
   if (!url) return undefined;
   if (/^https?:\/\//i.test(url)) return url;
-  return `${API_BASE}${url.startsWith("/") ? url : `/${url}`}`;
+  const base = apiBaseUrl();
+  return `${base}${url.startsWith("/") ? url : `/${url}`}`;
 }
 
 function getMarketplaceBadgeVariant(marketplace: Marketplace) {

@@ -1,7 +1,6 @@
 import { Inventory } from "@/types";
+import { apiBaseUrl } from "@/lib/runtimeEnv";
 import { api } from "./api";
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
 
 export async function getInventories(): Promise<Inventory[]> {
   return api<Inventory[]>("/api/inventory");
@@ -59,7 +58,7 @@ export async function adjustQuantity(id: string, delta: number): Promise<Invento
 export async function uploadProductImage(file: File): Promise<string> {
   const form = new FormData();
   form.append("image", file);
-  const response = await fetch(`${API_BASE}/api/uploads/image`, {
+  const response = await fetch(`${apiBaseUrl()}/api/uploads/image`, {
     method: "POST",
     body: form,
   });
@@ -74,5 +73,5 @@ export async function uploadProductImage(file: File): Promise<string> {
 export function resolveImageUrl(url?: string | null) {
   if (!url) return null;
   if (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("data:")) return url;
-  return `${API_BASE}${url}`;
+  return `${apiBaseUrl()}${url}`;
 }
