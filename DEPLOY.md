@@ -95,6 +95,8 @@ services:
       JWT_SECRET:                                           # empty — PASTE in Deploy UI
       STRIPE_SECRET_KEY:                                    # empty — PASTE (every secret the app reads)
       DATABASE_URL:                                         # empty — PASTE in Deploy UI
+      CORS_ORIGIN:                                          # empty — PASTE https://mytool.fybud.com
+      PUBLIC_API_URL:                                       # empty — Deploy-injected from fybud.domain
     ports:
       - "127.0.0.1:${API_HOST_PORT}:4100"                   # HOST port filled by Deploy
     labels:
@@ -114,6 +116,10 @@ services:
   web:
     image: fybud/mytool-web:${IMAGE_TAG:?IMAGE_TAG required}
     restart: unless-stopped
+    env_file: [.env]
+    environment:
+      # Deploy injects https://api.mytool.fybud.com from fybud.domain — never paste.
+      VITE_API_BASE_URL:
     ports:
       - "127.0.0.1:${WEB_HOST_PORT}:5173"
     labels:
@@ -174,20 +180,50 @@ optional** form — only:
 |---|---|
 | `PORT: 4100` | **Literal** — value is fixed in the compose file |
 | `JWT_SECRET:` (empty) | **Paste** in the Deploy UI — empty value *is* the flag |
+| `VITE_API_BASE_URL:` / `PUBLIC_API_URL:` (empty) | **Deploy-injected** from `fybud.domain` — declare empty, never paste, never put in `requiredEnv` |
 | `${VAR:?message}` | **Deploy-injected** (`*_HOST_PORT`, `IMAGE_TAG`) — never pasted |
 
+Deploy injects these public URL keys from compose `fybud.domain` labels (do not hardcode or paste):
+
+| Key | Value |
+|---|---|
+| `VITE_API_BASE_URL` | `https://` + API host |
+| `PUBLIC_API_URL` | same as API host (backend public URL) |
+| `PLATFORM_API_BASE_URL` | same as API host |
+| `PLATFORM_WEB_BASE_URL` | `https://` + web host |
+| `VITE_ADMIN_API_BASE_URL` / `PLATFORM_ADMIN_WEB_BASE_URL` | when admin hosts exist |
+
 Do **not** use `${KEY:-}`, `${KEY:-default}`, or an “optionalEnv” list. If the app needs a key,
-either give it a literal in compose or leave it empty and paste it in Deploy.
+either give it a literal in compose, leave it empty to paste, or leave it empty for a Deploy-injected name.
 
 Cross-check before merge:
 
 1. Every `requiredEnv` key appears as `KEY:` (empty) under some service’s `environment:`.
-2. Every empty `KEY:` in compose is listed in that tool’s `requiredEnv`, including every `*DATABASE*_URL`.
-3. Every Deploy-injected key uses `${KEY:?…}` (never empty, never `${KEY:-}`).
+2. Every empty paste `KEY:` in compose is listed in that tool’s `requiredEnv`, including every `*DATABASE*_URL` — **except** Deploy-injected public URL keys above.
+3. Host ports / `IMAGE_TAG` use `${KEY:?…}` (never empty, never `${KEY:-}`).
 
-Deploy refuses approve / env-save without every empty key (`missing[]`). Host ports and
-`IMAGE_TAG` are injected — do not paste them. Paste every declared `*DATABASE*_URL` using the
-shared Postgres URL format below.
+Deploy refuses approve / env-save without every **paste** key (`missing[]`). Host ports,
+`IMAGE_TAG`, and public URL injects are never pasted. Paste every declared `*DATABASE*_URL`
+using the shared Postgres URL format below.
+
+### SPA / Vite: runtime `env.js` (required for public frontends)
+
+Vite bakes `import.meta.env.VITE_*` at **image build** time. CI must **not** bake production API
+hosts into the image. Instead:
+
+1. Compose declares `VITE_API_BASE_URL:` (empty) on the web service — Deploy injects
+   `https://api.{tool}.fybud.com` into the container env.
+2. The web image’s entrypoint writes `/env.js` from `VITE_*` at container start.
+3. `index.html` loads `/env.js` **before** the app bundle; the SPA reads
+   `window.__ENV__.VITE_API_BASE_URL` (fallback to `import.meta.env` for local dev).
+
+If `/env.js` fails to load in the browser (`ERR_NAME_NOT_RESOLVED` / 404), login shows
+**Failed to fetch** and may hit same-origin `/api/...` on the web host (wrong — API is on
+`api.{tool}.fybud.com`). Fix DNS / hard-refresh; confirm `https://{tool}.fybud.com/env.js`
+shows the API URL.
+
+Also paste `CORS_ORIGIN=https://{tool}.fybud.com` (or your real web origin) on the API when
+the backend enforces CORS.
 
 ### Ports / network / DB
 
@@ -203,6 +239,13 @@ shared Postgres URL format below.
   Fix the compose / env and redeploy — you will get a toast with the conflict.
 - Disk writers need a named volume (containers are recreated every deploy).
 - Domains: web `{tool}.fybud.com`, API `api.{tool}.fybud.com`.
+- After renaming `fybud.domain` labels, Deploy expands the Let’s Encrypt SAN list
+  (DNS-01 via Cloudflare). If ssl: logs still say `skipping certbot` without `covers` /
+  `expanding`, rebuild deploy-api on the VPS (`docker compose up -d --build api`) — tool
+  redeploys do not update the control plane.
+- Multi-tenant **admin** portals still need their own control-plane DB URL (e.g.
+  `ADMIN_DATABASE_URL` → `cep-admin`) for the org registry. Per-client CEP DBs are pasted
+  inside the admin UI, not as Deploy `requiredEnv` for every client.
 
 ---
 
@@ -323,10 +366,20 @@ Adjust the matrix `context` / `dockerfile` / image names to match your folders. 
 
 1. Register the tool slug in Deploy (`tools.ts` or **Settings → Tool specs**).
 2. Push `main` (Actions builds + webhook).
-3. In Deploy UI: paste required env (JWT, OAuth, and every `*DATABASE*_URL`) — not host ports /
-   `IMAGE_TAG`.
+3. In Deploy UI: paste required env (JWT, OAuth, `CORS_ORIGIN`, and every `*DATABASE*_URL`) —
+   not host ports / `IMAGE_TAG` / `VITE_API_BASE_URL` / `PUBLIC_API_URL`.
 4. Approve once. Later pushes redeploy automatically.
-5. Confirm `https://{tool}.fybud.com` and `https://api.{tool}.fybud.com`.
+5. Confirm `https://{tool}.fybud.com`, `https://api.{tool}.fybud.com`, and
+   `https://{tool}.fybud.com/env.js` (SPA) shows the API base URL.
+
+### Quick triage (browser “Failed to fetch”)
+
+| Symptom | Likely cause |
+|---|---|
+| Console `ERR_NAME_NOT_RESOLVED` on `api.*` or `/env.js` | Local DNS / VPN — API and env.js must resolve |
+| Login posts to `{tool}.fybud.com/api/...` | `env.js` missing → SPA fell back to same-origin |
+| API `401` / `403` after DB restore | Stale JWT or user missing/`isActive=false` in that DB — sign out, re-login, check `User` rows |
+| Origin HTTPS fails only for one renamed hostname | LE cert SAN incomplete — rebuild deploy-api or expand cert SANs on the VPS |
 
 ## 4. Operating a deployment
 
@@ -373,6 +426,8 @@ The project page should make risk and recovery obvious:
 - [ ] `DEPLOY.md` at repo root (this file)
 - [ ] `docker-compose.deploy.yml` at repo root with `fybud.expose` / `fybud.domain` / `fybud.health`
 - [ ] Every pasteable / injected variable declared under `environment:`
+- [ ] Public URL keys (`VITE_API_BASE_URL`, …) declared empty — not in `requiredEnv`
+- [ ] SPA ships runtime `/env.js` from container `VITE_*` (not bake-time Hub URLs)
 - [ ] Public ports are `127.0.0.1:${*_HOST_PORT}:…`
 - [ ] Private services have no ports and no expose labels
 - [ ] `.github/workflows/build-push.yml` with Hub push + Deploy webhook + `concurrency`
@@ -381,3 +436,12 @@ The project page should make risk and recovery obvious:
 - [ ] Previous release is retained and available for rollback
 
 Verify from the Deploy repo: `node scripts/verify-all.mjs` and `node scripts/smoke-robust.mjs`.
+
+Org seed (maintainers): from the Deploy repo, with a GitHub token that can write
+`Fybud/org-defaults` and `Fybud/fybud-app-template`:
+
+```bash
+GITHUB_TOKEN=ghp_… node scripts/seed-org-deploy-md.mjs
+```
+
+That upserts root `DEPLOY.md` + `AGENTS.md` only (no compose / no `infra/`).

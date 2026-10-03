@@ -117,10 +117,11 @@ must **also** be declared under `environment:`, and the value itself says where 
 |---|---|
 | `PORT: 4100` | **Literal** — fixed in the compose file |
 | `JWT_SECRET:` / `DATABASE_URL:` (empty) | **Paste** in the Deploy UI. The empty value *is* the flag; `verify-all.mjs` cross-checks against `requiredEnv` |
+| `VITE_API_BASE_URL:` / `PUBLIC_API_URL:` / `PLATFORM_*_BASE_URL:` (empty) | **Deploy-injected** from `fybud.domain` — declare empty, never paste, never list in `requiredEnv` |
 | `${VAR:?message}` | **Deploy-injected** (`*_HOST_PORT`, `IMAGE_TAG`) — never pasted |
 
 There is **no optional** form. Do not use `${KEY:-}`, `${KEY:-default}`, or `optionalEnv`.
-Every key is either a literal in compose, empty (paste), or `${:?}` (Deploy-injected).
+Every key is either a literal in compose, empty (paste), empty (public-URL inject), or `${:?}` (port/tag inject).
 
 - An empty declaration is not a blank value: Deploy runs `docker compose --project-directory <tenant
   dir>`, so the entry resolves from the runtime `.env` it writes — the pasted value still reaches the
@@ -130,9 +131,12 @@ Every key is either a literal in compose, empty (paste), or `${:?}` (Deploy-inje
 - Deploy refuses to deploy without those keys: approve and env-save answer `400` with a `missing[]`
   list, and the runner re-checks before `compose up` — a push-to-`main` redeploy that lost a key fails
   **naming it** instead of booting a container with it unset.
-- The empty declaration and the spec's `requiredEnv` are one list kept in two places, and
+- The empty **paste** declaration and the spec's `requiredEnv` are one list kept in two places, and
   `verify-all.mjs` fails either drift: a tool whose spec `requiredEnv` key the compose never declares,
-  **and** a tool whose empty declaration the spec's `requiredEnv` does not list.
+  **and** a tool whose empty paste declaration the spec's `requiredEnv` does not list.
+  Public URL inject keys are excluded from that paste cross-check.
+- Vite SPAs must ship runtime `/env.js` from container `VITE_*` (see `DEPLOY.md`) — do not bake
+  production API hosts into the image at CI build time.
 - `verify-all.mjs` also fails `${KEY:-…}` in `environment:`, a service with `env_file` but no
   `environment:`, an empty `*_HOST_PORT` / `IMAGE_TAG` (injected, never pasted), and an `AGENTS.md`
   that drifted from this canonical file.
@@ -189,9 +193,12 @@ Every key is either a literal in compose, empty (paste), or `${:?}` (Deploy-inje
   database). Approving or saving env is rejected with a `missing[]` list when a paste var is absent.
 - Live deploy output streams into the project's Logs tab
   (`/api/projects/:tool/runs/:id/stream`, Server-Sent Events).
-- Do **not** paste host ports or `IMAGE_TAG` — Deploy injects those. **Do** paste every
-  `*DATABASE*_URL` as `postgres`/`postgres`@`fybud-postgres`.
+- Do **not** paste host ports, `IMAGE_TAG`, or public URL injects (`VITE_API_BASE_URL`,
+  `PUBLIC_API_URL`, `PLATFORM_*_BASE_URL`) — Deploy writes those from `fybud.domain`. **Do** paste
+  every `*DATABASE*_URL` as `postgres`/`postgres`@`fybud-postgres`, plus app secrets / `CORS_ORIGIN`.
 - Control-plane secrets (Cloudflare, Hub, webhook) live in Deploy’s own `.env` on the VPS, not in tool repos.
+- After renaming domains, rebuild deploy-api if ssl: still skips certbot without SAN expand —
+  tool redeploys do not update the control plane.
 
 ## Domain convention
 
