@@ -93,7 +93,7 @@ export class ShopifyAdapter implements ChannelAdapter {
       if (missing.length) {
         throw new AppError(
           `Shopify token is missing scopes: ${missing.join(", ")}. ` +
-            `In Dev Dashboard → ERP → active version, enable ` +
+            `In Dev Dashboard → ERM → active version, enable ` +
             `read_products, write_products, read_inventory, write_inventory, read_locations, ` +
             `write_fulfillments, write_merchant_managed_fulfillment_orders, ` +
             `then uninstall + reinstall the app on the shop and Connect again.`,

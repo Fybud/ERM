@@ -1,10 +1,10 @@
-# ERP — public frontend/api; redis private.
+# ERM — public frontend/api; redis private.
 # Only Deploy-injected: IMAGE_TAG + *_HOST_PORT. Everything else = paste (.env.deploy).
-name: erp
+name: erm
 
 services:
   backend:
-    image: fybud/erp-api:${IMAGE_TAG:?IMAGE_TAG required}
+    image: fybud/erm-api:${IMAGE_TAG:?IMAGE_TAG required}
     restart: unless-stopped
     env_file: [.env]
     environment:
@@ -26,7 +26,7 @@ services:
       - "127.0.0.1:${API_HOST_PORT}:4000"
     labels:
       fybud.expose: "true"
-      fybud.domain: api.erp.fybud.com
+      fybud.domain: api.erm.fybud.com
       fybud.role: api
       fybud.health: "/health"
     healthcheck:
@@ -44,13 +44,13 @@ services:
     networks: [internal]
 
   frontend:
-    image: fybud/erp-web:${IMAGE_TAG:?IMAGE_TAG required}
+    image: fybud/erm-web:${IMAGE_TAG:?IMAGE_TAG required}
     restart: unless-stopped
     ports:
       - "127.0.0.1:${WEB_HOST_PORT}:80"
     labels:
       fybud.expose: "true"
-      fybud.domain: erp.fybud.com
+      fybud.domain: erm.fybud.com
       fybud.role: web
       fybud.health: "any"
     depends_on: [backend]

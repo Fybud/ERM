@@ -12,8 +12,8 @@ Unified commerce operations for vendors: manage orders and inventory across Amaz
 
 | Service | Production (Fybud Deploy) | Local Docker |
 | --- | --- | --- |
-| Frontend | https://erp.fybud.com | http://localhost:3000 |
-| Backend | https://api.erp.fybud.com | http://localhost:4000 |
+| Frontend | https://erm.fybud.com | http://localhost:3000 |
+| Backend | https://api.erm.fybud.com | http://localhost:4000 |
 
 Deploy: root [`docker-compose.deploy.yml`](./docker-compose.deploy.yml) + [`DEPLOY.md`](./DEPLOY.md).
 Rules: [`AGENTS.md`](./AGENTS.md).
@@ -33,11 +33,11 @@ docker compose up --build
 
 Production does **not** use local `docker compose` or hand-written nginx. Push to `main`:
 
-1. `.github/workflows/build-push.yml` builds `fybud/erp-api` + `fybud/erp-web` and notifies Deploy.
+1. `.github/workflows/build-push.yml` builds `fybud/erm-api` + `fybud/erm-web` and notifies Deploy.
 2. Deploy sparse-clones root `docker-compose.deploy.yml`, allocates host ports, writes nginx + DNS.
 3. Paste once from [`.env.deploy`](./.env.deploy) in Deploy UI (incl. `DATABASE_URL` as
    `postgres`/`postgres`@`fybud-postgres`). Do not paste host ports / `IMAGE_TAG`.
-4. Approve → live at `https://erp.fybud.com` / `https://api.erp.fybud.com`.
+4. Approve → live at `https://erm.fybud.com` / `https://api.erm.fybud.com`.
 
 ## Local development (without Docker frontend/backend)
 

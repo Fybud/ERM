@@ -80,7 +80,7 @@ export interface ChannelOrderItem {
   unitPrice: number;
 }
 
-/** Normalized order as returned by channel adapters (not the ERP DB row). */
+/** Normalized order as returned by channel adapters (not the ERM DB row). */
 export interface ChannelOrder {
   channelOrderId: string;
   status: string;

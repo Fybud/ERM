@@ -39,7 +39,7 @@ services:
       REDIS_URL: redis://redis:6379
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-12345}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-dev-encryption-key-change-me-32b}
-      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173,http://localhost:3000,https://erp-demo.fybud.com}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173,http://localhost:3000,https://erm-demo.fybud.com}
       PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:4000}
       MOCK_CHANNELS: ${MOCK_CHANNELS:-false}
       SIMULATION_MODE: ${SIMULATION_MODE:-true}
@@ -72,7 +72,7 @@ services:
       context: ./frontend
       args:
         # Local: empty → nginx proxies /api to backend
-        # Prod:  https://api.erp-demo.fybud.com
+        # Prod:  https://api.erm-demo.fybud.com
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
     restart: unless-stopped
     expose:

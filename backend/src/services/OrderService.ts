@@ -105,7 +105,7 @@ export class OrderService {
       ...options.timestamps,
     };
 
-    // Shopify fulfill must succeed before ERP shows Packed; otherwise the board lies.
+    // Shopify fulfill must succeed before ERM shows Packed; otherwise the board lies.
     if (options.triggerFulfillment && to === "PACKED") {
       await this.maybeFulfillOnChannel(existing, to);
     }

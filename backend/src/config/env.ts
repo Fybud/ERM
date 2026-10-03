@@ -10,7 +10,7 @@ export const env = {
   encryptionKey:
     process.env.ENCRYPTION_KEY || "dev-encryption-key-change-me-32b",
   corsOrigin: process.env.CORS_ORIGIN || "http://localhost:5173",
-  /** Public origin Shopify/Flipkart can fetch, e.g. https://api.erp-demo.fybud.com */
+  /** Public origin Shopify/Flipkart can fetch, e.g. https://api.erm-demo.fybud.com */
   publicApiUrl: (process.env.PUBLIC_API_URL || "").replace(/\/$/, ""),
   /** Opt-in empty channel stubs (no seeded catalog). Default false for production. */
   mockChannels: (process.env.MOCK_CHANNELS || "false").toLowerCase() === "true",

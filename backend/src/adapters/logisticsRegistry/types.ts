@@ -27,7 +27,7 @@ export type LogisticsPartnerId = LogisticsServiceId;
 
 export type LogisticsKind = "MARKETPLACE" | "EXTERNAL";
 
-/** Every sales channel this ERP currently integrates. */
+/** Every sales channel this ERM currently integrates. */
 export const ALL_SALES_CHANNELS: ChannelType[] = ["AMAZON", "FLIPKART", "SHOPIFY"];
 
 export interface LogisticsCredentialField {

@@ -23,7 +23,7 @@ export interface LogisticsCredentials {
 export type LogisticsKind = "MARKETPLACE" | "EXTERNAL";
 
 export interface CreateShipmentInput {
-  /** ERP order id */
+  /** ERM order id */
   orderId: string;
   channelOrderId?: string;
   /** Sales channel id (for compatibility checks) */

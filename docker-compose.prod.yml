@@ -12,8 +12,8 @@ services:
   backend:
     environment:
       NODE_ENV: production
-      CORS_ORIGIN: ${CORS_ORIGIN:-https://erp-demo.fybud.com,https://api.erp-demo.fybud.com}
-      PUBLIC_API_URL: ${PUBLIC_API_URL:-https://api.erp-demo.fybud.com}
+      CORS_ORIGIN: ${CORS_ORIGIN:-https://erm-demo.fybud.com,https://api.erm-demo.fybud.com}
+      PUBLIC_API_URL: ${PUBLIC_API_URL:-https://api.erm-demo.fybud.com}
       MOCK_CHANNELS: ${MOCK_CHANNELS:-false}
       SIMULATION_MODE: ${SIMULATION_MODE:-true}
     ports:
@@ -23,6 +23,6 @@ services:
     build:
       context: ./frontend
       args:
-        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-https://api.erp-demo.fybud.com}
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-https://api.erm-demo.fybud.com}
     ports:
       - "127.0.0.1:3000:80"

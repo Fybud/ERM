@@ -23,7 +23,7 @@ import { writeSimLabelPdf } from "../adapters/logisticsRegistry/base/simLabel.js
 /**
  * Channel → Fulfillment Method → Optional Logistics Provider
  *
- * Pack = ERP status only (Packed column).
+ * Pack = ERM status only (Packed column).
  * Shipment / Pickup = create label + shipment, then merchant schedules pickup.
  */
 export class FulfillmentService {

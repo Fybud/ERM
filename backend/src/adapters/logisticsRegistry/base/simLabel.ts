@@ -22,7 +22,7 @@ export function buildShippingLabelPdf(parts: {
     parts.marketplace ? `Channel: ${parts.marketplace}` : "",
     parts.customerName ? `Ship to: ${parts.customerName}` : "",
     `Generated: ${new Date().toISOString()}`,
-    "fybud ERP — Simulation Label",
+    "fybud ERM — Simulation Label",
   ].filter(Boolean);
 
   const contentLines = ["BT", "/F1 18 Tf", "50 780 Td", `(${pdfEscape(lines[0])}) Tj`];

@@ -1,6 +1,6 @@
 name: build-push
 
-# Build ERP images on GitHub-hosted runners, push to Docker Hub,
+# Build ERM images on GitHub-hosted runners, push to Docker Hub,
 # then notify fybud Deploy to redeploy approved tenants.
 # The VPS never builds images. The web image is built with an empty
 # VITE_API_BASE_URL so it calls the API same-origin (one image per all tenants).
@@ -17,7 +17,7 @@ concurrency:
 
 env:
   DOCKERHUB_ORG: fybud
-  TOOL: erp
+  TOOL: erm
 
 jobs:
   build:
@@ -29,11 +29,11 @@ jobs:
       matrix:
         include:
           - name: api
-            image: erp-api
+            image: erm-api
             context: backend
             dockerfile: backend/Dockerfile
           - name: web
-            image: erp-web
+            image: erm-web
             context: frontend
             dockerfile: frontend/Dockerfile
     steps:
@@ -90,8 +90,8 @@ jobs:
             --arg commitMessage "$COMMIT_MSG" \
             --arg commitAuthor "$COMMIT_AUTHOR" \
             --arg pushedAt "$PUSHED_AT" \
-            --arg api "${DOCKERHUB_ORG}/erp-api:${TAG}" \
-            --arg web "${DOCKERHUB_ORG}/erp-web:${TAG}" \
+            --arg api "${DOCKERHUB_ORG}/erm-api:${TAG}" \
+            --arg web "${DOCKERHUB_ORG}/erm-web:${TAG}" \
             '{tool:$tool,tag:$tag,repo:$repo,commit:$commit,commitMessage:$commitMessage,commitAuthor:$commitAuthor,pushedAt:$pushedAt,images:{api:$api,web:$web}}')
           echo "$payload"
           curl --fail --silent --show-error --retry 3 --retry-all-errors --retry-delay 2 --connect-timeout 10 --max-time 60 -X POST "$DEPLOY_WEBHOOK_URL" \

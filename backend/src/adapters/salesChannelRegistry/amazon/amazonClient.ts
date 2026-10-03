@@ -159,7 +159,7 @@ export class AmazonClient {
         return;
       }
 
-      // Live Listings Items / Feeds patch is not fully wired — fail loudly so ERP does not report success.
+      // Live Listings Items / Feeds patch is not fully wired — fail loudly so ERM does not report success.
       throw new AppError(
         "Amazon live inventory push is not configured yet. Shopify inventory sync is live; Amazon/Flipkart need listings credentials/wiring.",
         501
