@@ -8,15 +8,15 @@ services:
     restart: unless-stopped
     env_file: [.env]
     environment:
-      PORT:
-      NODE_ENV:
+      PORT: "4000"
+      NODE_ENV: production
+      REDIS_URL: redis://redis:6379
+      SYNC_CRON: "*/5 * * * *"
+      LOG_LEVEL: info
+      MOCK_CHANNELS: "false"
       ADMIN_PASSWORD:
       ENCRYPTION_KEY:
       SIMULATION_MODE:
-      MOCK_CHANNELS:
-      SYNC_CRON:
-      LOG_LEVEL:
-      REDIS_URL:
       DATABASE_URL:
       CORS_ORIGIN:
       PUBLIC_API_URL:
