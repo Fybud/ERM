@@ -35,7 +35,8 @@ Production does **not** use local `docker compose` or hand-written nginx. Push t
 
 1. `.github/workflows/build-push.yml` builds `fybud/erp-api` + `fybud/erp-web` and notifies Deploy.
 2. Deploy sparse-clones root `docker-compose.deploy.yml`, allocates host ports, writes nginx + DNS.
-3. Paste once in Deploy UI: `ADMIN_PASSWORD`, `ENCRYPTION_KEY` (not host ports / `DATABASE_URL`).
+3. Paste once from [`.env.deploy`](./.env.deploy) in Deploy UI (incl. `DATABASE_URL` as
+   `postgres`/`postgres`@`fybud-postgres`). Do not paste host ports / `IMAGE_TAG`.
 4. Approve → live at `https://erp.fybud.com` / `https://api.erp.fybud.com`.
 
 ## Local development (without Docker frontend/backend)

@@ -38,7 +38,7 @@ MyTool/
 ```yaml
 services:
   web:
-    image: fybud/mytool-web:${IMAGE_TAG:-latest}
+    image: fybud/mytool-web:${IMAGE_TAG:?IMAGE_TAG required}
     ports:
       - "127.0.0.1:${WEB_HOST_PORT}:5173"   # container port fixed; HOST port filled by Deploy
     labels:
@@ -49,7 +49,7 @@ services:
     networks: [internal]
 
   api:
-    image: fybud/mytool-api:${IMAGE_TAG:-latest}
+    image: fybud/mytool-api:${IMAGE_TAG:?IMAGE_TAG required}
     ports:
       - "127.0.0.1:${API_HOST_PORT}:4100"
     labels:
@@ -70,7 +70,7 @@ services:
 
 ```yaml
   worker:
-    image: fybud/mytool-api:${IMAGE_TAG:-latest}
+    image: fybud/mytool-api:${IMAGE_TAG:?IMAGE_TAG required}
     command: ["worker"]
     # NO ports:
     # NO fybud.expose / fybud.domain
@@ -107,17 +107,17 @@ must **also** be declared under `environment:`, and the value itself says where 
 ```yaml
     env_file: [.env]
     environment:
-      PORT: 4100                        # literal — fixed in compose
+      PORT: 4100                        # literal — fixed in compose (or empty paste)
       JWT_SECRET:                       # empty — PASTE in the Deploy UI (requiredEnv)
       INTENT_CLASSIFIER_URL: http://intent-classifier:8091   # literal — fixed here
-      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL required}   # Deploy-injected — never pasted
+      DATABASE_URL:                     # empty — PASTE postgres/postgres@fybud-postgres/<db>
 ```
 
 | Value in `environment:` | Meaning |
 |---|---|
 | `PORT: 4100` | **Literal** — fixed in the compose file |
-| `JWT_SECRET:` (empty) | **Paste** in the Deploy UI. The empty value *is* the flag; `verify-all.mjs` cross-checks against `requiredEnv` |
-| `${VAR:?message}` | **Deploy-injected** (`*_HOST_PORT`, `DATABASE_URL`, per-tool URLs) — never pasted |
+| `JWT_SECRET:` / `DATABASE_URL:` (empty) | **Paste** in the Deploy UI. The empty value *is* the flag; `verify-all.mjs` cross-checks against `requiredEnv` |
+| `${VAR:?message}` | **Deploy-injected** (`*_HOST_PORT`, `IMAGE_TAG`) — never pasted |
 
 There is **no optional** form. Do not use `${KEY:-}`, `${KEY:-default}`, or `optionalEnv`.
 Every key is either a literal in compose, empty (paste), or `${:?}` (Deploy-injected).
@@ -147,14 +147,11 @@ Every key is either a literal in compose, empty (paste), or `${:?}` (Deploy-inje
 
 ### Network / DB
 
-- Shared Postgres container hostname: `fybud-postgres`. Superuser is **`postgres` / `postgres`**
-  (`postgresql://postgres:postgres@fybud-postgres:5432/<db>`). Deploy **creates the DB if
-  missing** before compose up, provisions a per-app role, and injects `DATABASE_URL` into the
-  app (do not paste it in the Deploy UI). The DB name is **not** required to match the tool
-  slug — set `DB_NAME` in Environment (default: tool / `tool-slug`; CEP-Admin defaults to
-  `cep`). **Multiple projects may share one database** — Deploy reuses the existing role
-  password. The Deploy UI **Databases** page lists all DBs, root credentials, and DB →
-  project mapping (one DB can map to several projects).
+- Shared Postgres container hostname: `fybud-postgres`. Superuser is **`postgres` / `postgres`**.
+  You must paste every DB URL yourself (`DATABASE_URL`, `PLATFORM_DATABASE_URL`, etc.) in the exact format:
+  `postgresql://postgres:postgres@fybud-postgres:5432/<dbname>`.
+  Deploy will **create the database if it is missing** when you save the env, but you are responsible for supplying this exact URL string. Any other user/password will be rejected.
+  The DB name need not match the tool slug, and **multiple projects may share one database.** The Deploy UI **Databases** page lists DBs and project mapping.
 - Never run a Postgres service inside the tool compose unless explicitly required and private.
 - **Network isolation:** only Postgres-facing services join external `fybud-net`. Every other service
   (web frontends, admin UIs, crawlers) stays on a project-local network:
@@ -192,7 +189,8 @@ Every key is either a literal in compose, empty (paste), or `${:?}` (Deploy-inje
   database). Approving or saving env is rejected with a `missing[]` list when a paste var is absent.
 - Live deploy output streams into the project's Logs tab
   (`/api/projects/:tool/runs/:id/stream`, Server-Sent Events).
-- Do **not** paste host ports or DATABASE_URL if Deploy provisions DB — it injects those.
+- Do **not** paste host ports or `IMAGE_TAG` — Deploy injects those. **Do** paste every
+  `*DATABASE*_URL` as `postgres`/`postgres`@`fybud-postgres`.
 - Control-plane secrets (Cloudflare, Hub, webhook) live in Deploy’s own `.env` on the VPS, not in tool repos.
 
 ## Domain convention

@@ -1,26 +1,25 @@
-# ERP — public frontend/api; redis stays private (no fybud.expose).
+# ERP — public frontend/api; redis private.
+# Only Deploy-injected: IMAGE_TAG + *_HOST_PORT. Everything else = paste (.env.deploy).
 name: erp
 
 services:
   backend:
-    image: fybud/erp-api:${IMAGE_TAG:-latest}
+    image: fybud/erp-api:${IMAGE_TAG:?IMAGE_TAG required}
     restart: unless-stopped
     env_file: [.env]
     environment:
-      PORT: 4000
-      NODE_ENV: production
-      # Empty = paste in Deploy UI. Literal = fixed here. ${VAR:?…} = Deploy-injected.
+      PORT:
+      NODE_ENV:
       ADMIN_PASSWORD:
       ENCRYPTION_KEY:
       SIMULATION_MODE:
       MOCK_CHANNELS:
       SYNC_CRON:
       LOG_LEVEL:
-      REDIS_URL: redis://redis:6379
-      # Deploy-injected — never pasted.
-      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL required}
-      CORS_ORIGIN: ${CORS_ORIGIN:?CORS_ORIGIN required}
-      PUBLIC_API_URL: ${PUBLIC_API_URL:?PUBLIC_API_URL required}
+      REDIS_URL:
+      DATABASE_URL:
+      CORS_ORIGIN:
+      PUBLIC_API_URL:
     volumes:
       - uploads:/app/uploads
     ports:
@@ -31,7 +30,6 @@ services:
       fybud.role: api
       fybud.health: "/health"
     healthcheck:
-      # node:alpine — use Node fetch (no curl package required).
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:4000/health').then(r=>process.exit(r.status<400?0:1)).catch(()=>process.exit(1))\""]
       interval: 15s
       timeout: 5s
@@ -46,7 +44,7 @@ services:
     networks: [internal]
 
   frontend:
-    image: fybud/erp-web:${IMAGE_TAG:-latest}
+    image: fybud/erp-web:${IMAGE_TAG:?IMAGE_TAG required}
     restart: unless-stopped
     ports:
       - "127.0.0.1:${WEB_HOST_PORT}:80"
@@ -54,7 +52,6 @@ services:
       fybud.expose: "true"
       fybud.domain: erp.fybud.com
       fybud.role: web
-      # Static nginx SPA — process-up only.
       fybud.health: "any"
     depends_on: [backend]
     networks: [internal]

@@ -41,7 +41,7 @@ jobs:
 
       - name: Compute image tag
         id: tag
-        run: echo "tag=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+        run: echo "tag=sha-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
 
@@ -78,11 +78,9 @@ jobs:
           COMMITTED_AT: ${{ github.event.head_commit.timestamp || github.event.repository.updated_at }}
           REPO: ${{ github.repository }}
         run: |
-          if [ -z "$DEPLOY_WEBHOOK_URL" ]; then
-            echo "DEPLOY_WEBHOOK_URL not set — skipping notify"
-            exit 0
-          fi
-          TAG="sha-${COMMIT_SHA::7}"
+          : "${DEPLOY_WEBHOOK_URL:?DEPLOY_WEBHOOK_URL secret is required}"
+          : "${DEPLOY_WEBHOOK_SECRET:?DEPLOY_WEBHOOK_SECRET secret is required}"
+          TAG="sha-${COMMIT_SHA}"
           PUSHED_AT="${COMMITTED_AT:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
           payload=$(jq -n \
             --arg tool "$TOOL" \
@@ -96,7 +94,7 @@ jobs:
             --arg web "${DOCKERHUB_ORG}/erp-web:${TAG}" \
             '{tool:$tool,tag:$tag,repo:$repo,commit:$commit,commitMessage:$commitMessage,commitAuthor:$commitAuthor,pushedAt:$pushedAt,images:{api:$api,web:$web}}')
           echo "$payload"
-          curl -sf -X POST "$DEPLOY_WEBHOOK_URL" \
+          curl --fail --silent --show-error --retry 3 --retry-all-errors --retry-delay 2 --connect-timeout 10 --max-time 60 -X POST "$DEPLOY_WEBHOOK_URL" \
             -H "Content-Type: application/json" \
             -H "X-Deploy-Secret: $DEPLOY_WEBHOOK_SECRET" \
             -d "$payload"

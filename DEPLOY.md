@@ -12,6 +12,47 @@ downloads only root `docker-compose.deploy.yml` (no repo clone) → free host po
 
 First deploy: paste secrets in Deploy UI + approve. Later pushes auto-redeploy.
 
+## Deployment safety contract
+
+A deployment is a transaction around a currently live release. A failure at any
+stage must leave that release serving, or restore the exact last known-good
+release. The control plane should report a deployment as successful only after
+all of these stages complete:
+
+```
+accepted -> compose validated -> image pulled -> candidate running
+-> host health gate -> DNS ready -> TLS ready -> nginx tested and reloaded
+-> public HTTPS verified -> successful
+```
+
+For the control-plane implementation, the non-negotiable rules are:
+
+- Serialize deploys per project and serialize global mutations (port allocation,
+  DNS ownership, nginx write/test/reload). A webhook delivery is not a lock.
+- Treat `(repo, commit SHA)` as idempotent. Ignore duplicate deliveries and
+  superseded commits; fetch the compose file at the same immutable commit as the
+  image tag, never from a moving `main` ref.
+- Validate the downloaded compose and its policy before `pull` or `up`. Reject
+  privileged services, host networking/PID/IPC, Docker socket or arbitrary host
+  binds, non-loopback published ports, unsupported labels/networks, mutable image
+  tags, and services without CPU/memory limits or `restart: unless-stopped`.
+- Pull and verify every candidate image before changing containers. Retain the
+  local current and previous image; do not depend on a registry pull during
+  rollback.
+- Use an atomic nginx update: write a candidate config, test the complete nginx
+  configuration, atomically promote it, then reload. If test or reload fails,
+  restore the previous site file and leave the loaded configuration untouched.
+- Persist the phase, image digest, compose commit, allocated ports, and encrypted
+  environment snapshot on every run. Restart recovery reconciles that desired
+  state with Docker, nginx, DNS, and TLS rather than blindly replaying a job.
+- A database migration is not automatically rollback-safe. Use backward-compatible
+  expand/migrate/contract changes and run destructive migrations only in a later
+  release.
+
+`fybud.health` is liveness/readiness for an exposed service, not proof that an
+application workflow works. Add an optional, app-specific smoke check before
+promotion when `/health` alone is insufficient.
+
 ---
 
 ## 0. Repo layout (required)
@@ -46,14 +87,14 @@ name: mytool
 
 services:
   api:
-    image: fybud/mytool-api:${IMAGE_TAG:-latest}
+    image: fybud/mytool-api:${IMAGE_TAG:?IMAGE_TAG required}
     restart: unless-stopped
     env_file: [.env]
     environment:
       PORT: 4100                                            # literal — fixed in compose
       JWT_SECRET:                                           # empty — PASTE in Deploy UI
       STRIPE_SECRET_KEY:                                    # empty — PASTE (every secret the app reads)
-      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL required}  # Deploy-injected — never paste
+      DATABASE_URL:                                         # empty — PASTE in Deploy UI
     ports:
       - "127.0.0.1:${API_HOST_PORT}:4100"                   # HOST port filled by Deploy
     labels:
@@ -71,7 +112,7 @@ services:
     networks: [fybud-net]
 
   web:
-    image: fybud/mytool-web:${IMAGE_TAG:-latest}
+    image: fybud/mytool-web:${IMAGE_TAG:?IMAGE_TAG required}
     restart: unless-stopped
     ports:
       - "127.0.0.1:${WEB_HOST_PORT}:5173"
@@ -83,14 +124,14 @@ services:
     networks: [internal]
 
   worker:                       # private — no ports, no expose labels
-    image: fybud/mytool-api:${IMAGE_TAG:-latest}
+    image: fybud/mytool-api:${IMAGE_TAG:?IMAGE_TAG required}
     restart: unless-stopped
     command: ["worker"]
     env_file: [.env]
     environment:
       # Declare every key the worker reads (empty = paste, or ${:?} = injected).
       JWT_SECRET:
-      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL required}
+      DATABASE_URL:
     networks: [fybud-net, internal]
 
 networks:
@@ -133,7 +174,7 @@ optional** form — only:
 |---|---|
 | `PORT: 4100` | **Literal** — value is fixed in the compose file |
 | `JWT_SECRET:` (empty) | **Paste** in the Deploy UI — empty value *is* the flag |
-| `${VAR:?message}` | **Deploy-injected** (`*_HOST_PORT`, `DATABASE_URL`, URLs) — never pasted |
+| `${VAR:?message}` | **Deploy-injected** (`*_HOST_PORT`, `IMAGE_TAG`) — never pasted |
 
 Do **not** use `${KEY:-}`, `${KEY:-default}`, or an “optionalEnv” list. If the app needs a key,
 either give it a literal in compose or leave it empty and paste it in Deploy.
@@ -141,27 +182,23 @@ either give it a literal in compose or leave it empty and paste it in Deploy.
 Cross-check before merge:
 
 1. Every `requiredEnv` key appears as `KEY:` (empty) under some service’s `environment:`.
-2. Every empty `KEY:` in compose is listed in that tool’s `requiredEnv`.
+2. Every empty `KEY:` in compose is listed in that tool’s `requiredEnv`, including every `*DATABASE*_URL`.
 3. Every Deploy-injected key uses `${KEY:?…}` (never empty, never `${KEY:-}`).
 
 Deploy refuses approve / env-save without every empty key (`missing[]`). Host ports and
-`DATABASE_URL` are injected — do not paste them.
+`IMAGE_TAG` are injected — do not paste them. Paste every declared `*DATABASE*_URL` using the
+shared Postgres URL format below.
 
 ### Ports / network / DB
 
 - Ports: always `127.0.0.1:${*_HOST_PORT}:<container>` — never hardcode host ports.
-- Shared Postgres hostname: `fybud-postgres` on external `fybud-net`. Deploy **creates the
-  database if it does not exist** before `docker compose up`, then injects `DATABASE_URL`.
+- Shared Postgres hostname: `fybud-postgres` on external `fybud-net`. Paste each DB URL in the
+  Deploy UI; Deploy validates it and **creates the database if it does not exist** before `docker
+  compose up`.
 - Shared Postgres login (superuser / admin): **username `postgres`, password `postgres`**.
-  Example: `postgresql://postgres:postgres@fybud-postgres:5432/<db_name>`. Apps still get a
-  Deploy-injected `DATABASE_URL` — do not paste the URL yourself unless you are wiring local
-  tools against that shared instance.
-- **Database name is not required to match the tool slug.** Set `DB_NAME=my_app_db` in the
-  Deploy Environment (or leave it unset to default to the tool / `tool-slug` credential).
-  **Multiple projects may share one database** (e.g. CEP + CEP-Admin both use `cep`). Deploy
-  reuses the existing role password so sharing does not break the other project. CEP-Admin
-  defaults to `DB_NAME=cep`. See the **Databases** sidebar for mappings (one DB can list
-  several projects).
+  Example: `postgresql://postgres:postgres@fybud-postgres:5432/<db_name>`. The database name
+  need not match the tool slug and multiple projects may share a database. See the **Databases**
+  sidebar for mappings.
 - Before compose, Deploy also checks for conflicting `container_name:` values and domains.
   Fix the compose / env and redeploy — you will get a toast with the conflict.
 - Disk writers need a named volume (containers are recreated every deploy).
@@ -211,7 +248,7 @@ jobs:
 
       - name: Compute image tag
         id: tag
-        run: echo "tag=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+        run: echo "tag=sha-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
 
@@ -246,11 +283,9 @@ jobs:
           COMMITTED_AT: ${{ github.event.head_commit.timestamp || github.event.repository.updated_at }}
           REPO: ${{ github.repository }}
         run: |
-          if [ -z "$DEPLOY_WEBHOOK_URL" ]; then
-            echo "DEPLOY_WEBHOOK_URL not set — skipping notify"
-            exit 0
-          fi
-          TAG="sha-${COMMIT_SHA::7}"
+          : "${DEPLOY_WEBHOOK_URL:?DEPLOY_WEBHOOK_URL secret is required}"
+          : "${DEPLOY_WEBHOOK_SECRET:?DEPLOY_WEBHOOK_SECRET secret is required}"
+          TAG="sha-${COMMIT_SHA}"
           PUSHED_AT="${COMMITTED_AT:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
           payload=$(jq -n \
             --arg tool "$TOOL" \
@@ -264,7 +299,8 @@ jobs:
             --arg web "${DOCKERHUB_ORG}/mytool-web:${TAG}" \
             '{tool:$tool,tag:$tag,repo:$repo,commit:$commit,commitMessage:$commitMessage,commitAuthor:$commitAuthor,pushedAt:$pushedAt,images:{api:$api,web:$web}}')
           echo "$payload"
-          curl -sf -X POST "$DEPLOY_WEBHOOK_URL" \
+          curl --fail --silent --show-error --retry 3 --retry-all-errors --retry-delay 2 \
+            --connect-timeout 10 --max-time 60 -X POST "$DEPLOY_WEBHOOK_URL" \
             -H "Content-Type: application/json" \
             -H "X-Deploy-Secret: $DEPLOY_WEBHOOK_SECRET" \
             -d "$payload"
@@ -287,13 +323,52 @@ Adjust the matrix `context` / `dockerfile` / image names to match your folders. 
 
 1. Register the tool slug in Deploy (`tools.ts` or **Settings → Tool specs**).
 2. Push `main` (Actions builds + webhook).
-3. In Deploy UI: paste required env (JWT, OAuth, …) — not host ports / `DATABASE_URL`.
+3. In Deploy UI: paste required env (JWT, OAuth, and every `*DATABASE*_URL`) — not host ports /
+   `IMAGE_TAG`.
 4. Approve once. Later pushes redeploy automatically.
 5. Confirm `https://{tool}.fybud.com` and `https://api.{tool}.fybud.com`.
 
+## 4. Operating a deployment
+
+Before approving a first deploy, confirm the compose validator passes, every
+required environment variable is present, and the images are immutable `sha-*`
+tags from the successful Actions build. During a deploy, the UI should show the
+current stage and stream its logs. Do not call it live merely because Docker
+started a container: success requires the host probe and public HTTPS check.
+
+If a run fails, use the stage shown in the run record:
+
+| Failed stage | Safe response |
+|---|---|
+| Compose / policy | Fix the repository compose and push a new commit. No production change should have occurred. |
+| Image pull | Retry only after the image is present in Docker Hub; keep the current release. |
+| Health / smoke | Inspect candidate logs; automatic rollback should restore the prior image **and its environment snapshot**. |
+| DNS / TLS | Existing correct DNS may continue serving; a new domain remains pending until DNS and TLS are verified. |
+| Nginx | Restore the previous site config and reload only after `nginx -t` passes. |
+
+Manual rollback selects a previous successful release. It must restore its image
+digest, compose revision, ports, and encrypted environment snapshot together;
+rolling back only `IMAGE_TAG` can leave an incompatible configuration or secret.
+
+## 5. UI requirements
+
+The project page should make risk and recovery obvious:
+
+- One timeline with queued, validation, pull, candidate, health, DNS, TLS,
+  nginx, public-check, rollback, and final states; show timestamps and duration.
+- A prominent **current release** card (digest, commit, compose revision, secret
+  version, deployment time) next to the candidate; never label a project
+  “healthy” from Docker state alone.
+- A failure card with the failed stage, actionable error, preserved previous
+  release, retry eligibility, and a one-click safe rollback/retry where valid.
+- Domains should separately show desired vs observed DNS, origin HTTPS,
+  Cloudflare/public HTTPS, certificate expiry, and last successful check.
+- Surface host capacity (disk, RAM, CPU), queued jobs, image retention, and
+  drift warnings before the user presses Deploy.
+
 ---
 
-## 4. Checklist
+## 6. Checklist
 
 - [ ] `DEPLOY.md` at repo root (this file)
 - [ ] `docker-compose.deploy.yml` at repo root with `fybud.expose` / `fybud.domain` / `fybud.health`
@@ -302,5 +377,7 @@ Adjust the matrix `context` / `dockerfile` / image names to match your folders. 
 - [ ] Private services have no ports and no expose labels
 - [ ] `.github/workflows/build-push.yml` with Hub push + Deploy webhook + `concurrency`
 - [ ] Tool registered in Deploy; secrets pasted; first approve done
+- [ ] Public HTTPS and the relevant application smoke check passed
+- [ ] Previous release is retained and available for rollback
 
 Verify from the Deploy repo: `node scripts/verify-all.mjs` and `node scripts/smoke-robust.mjs`.
