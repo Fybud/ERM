@@ -9,7 +9,7 @@ export class AuthController {
       throw new AppError("No admin password configured", 500);
     }
     if (password !== env.adminPassword) {
-      throw new AppError(`Invalid password. Expected '${env.adminPassword}' but got '${password}'`, 401);
+      throw new AppError("Invalid password", 401);
     }
     return res.json({ success: true });
   };
